@@ -2,4 +2,4 @@ flask
 twilio
 requests
 python-dotenv
- 
+gunicorn
