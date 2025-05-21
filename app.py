@@ -935,17 +935,6 @@ def process_call_command(chat_id, message_text):
         logger.error(f"❌ ERROR AL INICIAR LLAMADA DESDE TELEGRAM: {e}")
         send_telegram_response(chat_id, f"❌ <b>Error al iniciar llamada:</b> {str(e)}")
         return False
-        
-    except Exception as e:
-        logger.error(f"❌ ERROR AL INICIAR LLAMADA DESDE TELEGRAM: {e}")
-        send_telegram_response(chat_id, f"❌ <b>Error al iniciar llamada:</b> {str(e)}")
-        return False
-        
-    except Exception as e:
-        logger.error(f"❌ ERROR AL INICIAR LLAMADA DESDE TELEGRAM: {e}")
-        send_telegram_response(chat_id, f"❌ <b>Error al iniciar llamada:</b> {str(e)}")
-        return False
-    
 
 def telegram_polling_worker():
     """Worker para el polling de Telegram en segundo plano."""
