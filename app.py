@@ -900,14 +900,14 @@ def process_call_command(chat_id, message_text):
         logger.info(f"📞 URL para el callback de estado: {status_callback_url}")
         
         # Hacer la llamada usando la API de Twilio con el callback de estado
-        call = client.calls.create(
-            to=phone_number,
-            from_=TWILIO_PHONE_NUMBER,
-            url=url,
-            status_callback=status_callback_url,
-            status_callback_method='POST',
-            status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed']
-        )
+        # call = client.calls.create(
+        #     to=phone_number,
+        #     from_=TWILIO_PHONE_NUMBER,
+        #     url=url,
+        #     status_callback=status_callback_url,
+        #     status_callback_method='POST',
+        #     status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed']
+        # )
         
         # Inicializar la sesión para el nuevo SID con estado inicial
         global_user_sessions[call.sid] = {
