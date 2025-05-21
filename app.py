@@ -117,14 +117,14 @@ def make_call():
     logger.info(f"📞 URL para el callback de estado: {status_callback_url}")
     
     try:
-        # call = client.calls.create(
-        #     to=YOUR_PHONE_NUMBER,
-        #     from_=TWILIO_PHONE_NUMBER,
-        #     url=url,
-        #     status_callback=status_callback_url,
-        #     status_callback_method='POST',
-        #     status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed']
-        # )
+        call = client.calls.create(
+            to=YOUR_PHONE_NUMBER,
+            from_=TWILIO_PHONE_NUMBER,
+            url=url,
+            status_callback=status_callback_url,
+            status_callback_method='POST',
+            status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed']
+        )
         
         # Inicializar la sesión para el nuevo SID
         global_user_sessions[call.sid] = {
@@ -158,6 +158,7 @@ def call_status_callback():
         global_user_sessions[call_sid] = {}
     
     # Guardar el estado y la hora de la actualización
+    last_status = global_user_sessions[call_sid].get('call_status')
     global_user_sessions[call_sid]['call_status'] = call_status
     global_user_sessions[call_sid]['last_update'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     global_user_sessions[call_sid]['call_duration'] = call_duration
@@ -168,49 +169,51 @@ def call_status_callback():
     # Guardar los cambios
     save_session_to_file(global_user_sessions)
     
-    # Definir un icono según el estado
-    status_icon = "📞"
-    status_desc = "Estado actualizado"
-    
-    if call_status == "initiated":
-        status_icon = "🔄"
-        status_desc = "Llamada iniciada"
-    elif call_status == "ringing":
-        status_icon = "📳"
-        status_desc = "Teléfono sonando"
-    elif call_status == "in-progress":
-        status_icon = "✅"
-        status_desc = "Llamada contestada"
-    elif call_status == "completed":
-        status_icon = "🏁"
-        status_desc = "Llamada finalizada"
-    elif call_status == "busy":
-        status_icon = "🔴"
-        status_desc = "Número ocupado"
-    elif call_status == "no-answer":
-        status_icon = "❌"
-        status_desc = "Sin respuesta"
-    elif call_status == "failed":
-        status_icon = "⚠️"
-        status_desc = "Llamada fallida"
-    elif call_status == "canceled":
-        status_icon = "🚫"
-        status_desc = "Llamada cancelada"
-    
-    # Crear mensaje de notificación
-    message = f"{status_icon} <b>{status_desc}</b>\nSID: {call_sid}\nNúmero: {to_number}\nEstado: {call_status}"
-    
-    # Añadir duración si está disponible y no es cero
-    if call_status in ["completed", "in-progress"] and call_duration != '0':
-        message += f"\nDuración: {call_duration}s"
-    
-    # Enviar notificación a Telegram
-    send_to_telegram(message)
-    
-    # Si hay un chat_id específico guardado, enviar también la notificación allí
-    telegram_chat_id = global_user_sessions[call_sid].get('telegram_chat_id')
-    if telegram_chat_id:
-        send_telegram_response(telegram_chat_id, message)
+    # Solo enviar notificación si el estado ha cambiado
+    if call_status != last_status:
+        # Definir un icono según el estado
+        status_icon = "📞"
+        status_desc = "Estado actualizado"
+        
+        if call_status == "initiated":
+            status_icon = "🔄"
+            status_desc = "Llamada iniciada"
+        elif call_status == "ringing":
+            status_icon = "📳"
+            status_desc = "Teléfono sonando"
+        elif call_status == "in-progress":
+            status_icon = "✅"
+            status_desc = "Llamada contestada"
+        elif call_status == "completed":
+            status_icon = "🏁"
+            status_desc = "Llamada finalizada"
+        elif call_status == "busy":
+            status_icon = "🔴"
+            status_desc = "Número ocupado"
+        elif call_status == "no-answer":
+            status_icon = "❌"
+            status_desc = "Sin respuesta"
+        elif call_status == "failed":
+            status_icon = "⚠️"
+            status_desc = "Llamada fallida"
+        elif call_status == "canceled":
+            status_icon = "🚫"
+            status_desc = "Llamada cancelada"
+        
+        # Crear mensaje de notificación
+        message = f"{status_icon} <b>{status_desc}</b>\nSID: {call_sid}\nNúmero: {to_number}\nEstado: {call_status}"
+        
+        # Añadir duración si está disponible y no es cero
+        if call_status in ["completed", "in-progress"] and call_duration != '0':
+            message += f"\nDuración: {call_duration}s"
+        
+        # Enviar notificación a Telegram
+        send_to_telegram(message)
+        
+        # Si hay un chat_id específico guardado, enviar también la notificación allí
+        telegram_chat_id = global_user_sessions[call_sid].get('telegram_chat_id')
+        if telegram_chat_id:
+            send_telegram_response(telegram_chat_id, message)
     
     return jsonify({"status": "ok"})
 
