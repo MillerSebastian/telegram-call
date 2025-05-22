@@ -143,6 +143,8 @@ def make_call():
         logger.error(f"❌ ERROR AL INICIAR LLAMADA: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# Función auxiliar para identificar llamadas desde Telegram
+
 @app.route('/call-status-callback', methods=['POST'])
 def call_status_callback():
     """Endpoint para recibir actualizaciones de estado de llamada desde Twilio."""
@@ -169,8 +171,14 @@ def call_status_callback():
     # Guardar los cambios
     save_session_to_file(global_user_sessions)
     
-    # Solo enviar notificación si el estado ha cambiado
-    if call_status != last_status:
+    # Verificar si la llamada fue iniciada desde Telegram
+    telegram_chat_id = global_user_sessions[call_sid].get('telegram_chat_id')
+    
+    # Evitar duplicar notificación inicial para llamadas desde Telegram
+    skip_initial_notification = (call_status == "initiated" and telegram_chat_id and last_status is None)
+    
+    # Solo enviar notificación si el estado ha cambiado Y no es una duplicación
+    if call_status != last_status and not skip_initial_notification:
         # Definir un icono según el estado
         status_icon = "📞"
         status_desc = "Estado actualizado"
@@ -211,7 +219,6 @@ def call_status_callback():
         send_to_telegram(message)
         
         # Si hay un chat_id específico guardado, enviar también la notificación allí
-        telegram_chat_id = global_user_sessions[call_sid].get('telegram_chat_id')
         if telegram_chat_id:
             send_telegram_response(telegram_chat_id, message)
     
@@ -767,6 +774,12 @@ def send_to_telegram(message):
         logger.error(f"❌ ERROR AL ENVIAR A TELEGRAM: {e}")
         return None
 
+def is_call_from_telegram(call_sid):
+    """Verifica si una llamada fue iniciada desde Telegram."""
+    return (call_sid in global_user_sessions and 
+            'telegram_chat_id' in global_user_sessions[call_sid])
+
+
 def send_telegram_response(chat_id, text):
     """Envía una respuesta directa a un chat de Telegram."""
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
@@ -923,11 +936,10 @@ def process_call_command(chat_id, message_text):
         
         logger.info(f"📞 Nueva llamada iniciada desde Telegram: SID={call.sid}, Número={phone_number}")
         
-        # Confirmar al usuario de Telegram
+        # Confirmar al usuario de Telegram (solo una notificación)
         send_telegram_response(chat_id, f"✅ <b>Llamada iniciada al número {phone_number}</b>\nSID: {call.sid}\nEstado: Iniciando...")
         
-        # Notificar inmediatamente sobre la llamada iniciada
-        send_to_telegram(f"🚀 <b>Llamada iniciada</b>\nSID: {call.sid}\nNúmero: {phone_number}\nEstado: Iniciando...")
+        # NO enviar notificación duplicada aquí - el callback se encargará de las actualizaciones
         
         return True
         
