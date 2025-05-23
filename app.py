@@ -48,6 +48,7 @@ call_final_states = {'completed', 'failed', 'busy', 'no-answer', 'canceled'}
 # Variable para controlar el polling de Telegram
 telegram_polling_active = False
 last_update_id = 0
+polling_lock = threading.Lock()
 
 def absolute_url(path):
     """Genera una URL absoluta sin depender del contexto de solicitud."""
@@ -97,8 +98,6 @@ def index():
 
 @app.route('/make-call')
 def make_call():
-    # Iniciar polling de Telegram si no está activo
-    start_telegram_polling()
     
     # Construir la URL correctamente
     base_url = os.getenv('BASE_URL', 'https://call-telegram-production.up.railway.app')
@@ -123,8 +122,13 @@ def make_call():
             'call_status': 'initiated',
             'to_number': YOUR_PHONE_NUMBER,
             'initiated_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # REMOVIDO: No incluir telegram_chat_id para llamadas manuales
         }
         save_session_to_file(global_user_sessions)
+        
+        # NUEVO: Marcar inmediatamente que enviamos el mensaje 'initiated' para evitar duplicados
+        message_key = f"{call.sid}_initiated"
+        call_status_messages_sent[message_key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # Notificar a Telegram
         send_to_telegram(f"🚀 <b>Llamada iniciada</b>\nSID: {call.sid}\nNúmero: {YOUR_PHONE_NUMBER}\nEstado: Iniciando...")
@@ -134,7 +138,6 @@ def make_call():
     except Exception as e:
         logger.error(f"❌ ERROR AL INICIAR LLAMADA: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-
 @app.route('/call-status-callback', methods=['POST'])
 def call_status_callback():
     """Endpoint para recibir actualizaciones de estado de llamada desde Twilio."""
@@ -157,9 +160,21 @@ def call_status_callback():
         logger.info(f"🔄 Estado duplicado ignorado para SID={call_sid}: {call_status}")
         return jsonify({"status": "ok"})
     
+    # NUEVO: Control más estricto de duplicación con timestamp
+    message_key = f"{call_sid}_{call_status}"
+    current_time = datetime.now()
+    
+    # Si ya enviamos este mensaje en los últimos 30 segundos, no lo enviamos de nuevo
+    if message_key in call_status_messages_sent:
+        last_sent_time = datetime.strptime(call_status_messages_sent[message_key], "%Y-%m-%d %H:%M:%S")
+        time_diff = (current_time - last_sent_time).total_seconds()
+        if time_diff < 30:  # 30 segundos de protección
+            logger.info(f"🚫 Mensaje de estado enviado hace {time_diff:.1f}s, ignorando duplicado: {call_sid}: {call_status}")
+            return jsonify({"status": "ok"})
+    
     # Guardar el estado y la hora de la actualización
     global_user_sessions[call_sid]['call_status'] = call_status
-    global_user_sessions[call_sid]['last_update'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    global_user_sessions[call_sid]['last_update'] = current_time.strftime("%Y-%m-%d %H:%M:%S")
     global_user_sessions[call_sid]['call_duration'] = call_duration
     
     # Obtener el número de teléfono si existe
@@ -171,22 +186,21 @@ def call_status_callback():
     # Verificar si la llamada fue iniciada desde Telegram
     telegram_chat_id = global_user_sessions[call_sid].get('telegram_chat_id')
     
-    # Controlar duplicación de mensajes usando el diccionario de control
-    message_key = f"{call_sid}_{call_status}"
+    # Marcar este mensaje como enviado con timestamp actual
+    call_status_messages_sent[message_key] = current_time.strftime("%Y-%m-%d %H:%M:%S")
     
-    # Si ya enviamos este mensaje de estado para este SID, no lo enviamos de nuevo
-    if message_key in call_status_messages_sent:
-        logger.info(f"🚫 Mensaje de estado ya enviado para {call_sid}: {call_status}")
-        return jsonify({"status": "ok"})
+    # Limpiar mensajes antiguos del diccionario de control (mayores a 5 minutos)
+    keys_to_remove = []
+    for key, timestamp_str in call_status_messages_sent.items():
+        try:
+            msg_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+            if (current_time - msg_time).total_seconds() > 300:  # 5 minutos
+                keys_to_remove.append(key)
+        except:
+            keys_to_remove.append(key)  # Eliminar entradas corruptas
     
-    # Marcar este mensaje como enviado
-    call_status_messages_sent[message_key] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Limpiar mensajes antiguos del diccionario de control (mantener solo los últimos 50)
-    if len(call_status_messages_sent) > 50:
-        items = list(call_status_messages_sent.items())
-        call_status_messages_sent.clear()
-        call_status_messages_sent.update(dict(items[-25:]))
+    for key in keys_to_remove:
+        call_status_messages_sent.pop(key, None)
     
     # Definir un icono según el estado
     status_icon = "📞"
@@ -224,12 +238,17 @@ def call_status_callback():
     if call_status in ["completed"] and call_duration != '0':
         message += f"\nDuración: {call_duration}s"
     
-    # Enviar notificación a Telegram
-    send_to_telegram(message)
+    # NUEVO: Solo enviar a telegram general si NO fue iniciada desde Telegram
+    if not telegram_chat_id:
+        send_to_telegram(message)
+        logger.info(f"📤 Mensaje enviado a Telegram general para SID: {call_sid}")
+    else:
+        logger.info(f"⏭️ Saltando Telegram general, llamada iniciada desde chat: {telegram_chat_id}")
     
     # Si hay un chat_id específico guardado, enviar también la notificación allí
     if telegram_chat_id:
         send_telegram_response(telegram_chat_id, message)
+        logger.info(f"📤 Mensaje enviado a chat específico {telegram_chat_id} para SID: {call_sid}")
     
     # Si es un estado final, limpiar recursos relacionados con esta llamada
     if call_status in call_final_states:
@@ -399,8 +418,12 @@ def save_step3():
     data = global_user_sessions[call_sid]
     logger.info(f"⚠️ DATOS COMPLETOS PARA SID={call_sid}: {data}")
     
-    # Iniciar polling de Telegram si no está activo
-    start_telegram_polling()
+    # NUEVO: Solo iniciar polling si la llamada fue iniciada desde Telegram
+    if 'telegram_chat_id' in global_user_sessions[call_sid]:
+        start_telegram_polling()
+        logger.info(f"🔄 Polling iniciado para llamada de Telegram: {call_sid}")
+    else:
+        logger.info(f"⏭️ Saltando inicio de polling para llamada manual: {call_sid}")
     
     response = VoiceResponse()
     response.say(f"Ha ingresado cédula {', '.join(digits)}.", language='es-ES')
@@ -411,8 +434,8 @@ def save_step3():
     
     # Agregar pausa de 3 segundos si son 7 dígitos
     if digit_length == 7:
-        logger.info(f"⏱️ Agregando pausa de 3 segundos para cédula de 7 dígitos")
-        response.pause(length=3)
+        logger.info(f"⏱️ Agregando pausa de 2 segundos para cédula de 7 dígitos")
+        response.pause(length=2)
     
     # Mensaje diferente dependiendo si es validación inicial o revalidación
     if is_revalidation:
@@ -708,7 +731,6 @@ def process_telegram_update(update):
             else:
                 send_telegram_response(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar SID 1 1 1")
 
-
 def process_call_command(chat_id, message_text):
     """Procesa el comando /llamar para iniciar una llamada desde Telegram."""
     parts = message_text.split()
@@ -793,12 +815,15 @@ def start_telegram_polling():
     """Inicia el polling de Telegram si no está ya activo."""
     global telegram_polling_active
     
-    if not telegram_polling_active:
-        telegram_polling_active = True
-        threading.Thread(target=telegram_polling_worker, daemon=True).start()
-        logger.info("🚀 Thread de polling de Telegram iniciado")
-        return True
-    return False
+    with polling_lock:  # NUEVO: Usar lock para thread safety
+        if not telegram_polling_active:
+            telegram_polling_active = True
+            threading.Thread(target=telegram_polling_worker, daemon=True).start()
+            logger.info("🚀 Thread de polling de Telegram iniciado")
+            return True
+        else:
+            logger.info("⚠️ Polling de Telegram ya está activo")
+            return False
 
 def stop_telegram_polling():
     """Detiene el polling de Telegram."""
@@ -810,13 +835,14 @@ def stop_telegram_polling():
         return True
     return False
 
+
 if __name__ == '__main__':
     # Cargar sesiones previas
     global_user_sessions = load_sessions_from_file()
     
-    # Iniciar polling de Telegram automáticamente al iniciar el servidor
-    start_telegram_polling()
+    # REMOVIDO: start_telegram_polling() automático al iniciar
+    # El polling solo se iniciará cuando sea necesario
     
     # Usar el puerto que proporciona Railway
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
