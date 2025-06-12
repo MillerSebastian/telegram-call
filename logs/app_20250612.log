@@ -1,0 +1,133 @@
+2025-06-12 01:15:30,350 - INFO - 📂 Sesiones cargadas desde archivo: 5 sesiones
+2025-06-12 01:15:30,355 - INFO - 📂 Sesiones cargadas desde archivo: 5 sesiones
+2025-06-12 01:15:30,356 - INFO - 🔄 Iniciando polling de Telegram...
+2025-06-12 01:15:30,356 - INFO - 🚀 Thread de polling de Telegram iniciado
+2025-06-12 01:15:31,007 - INFO - 📥 Recibidas 2 actualizaciones de Telegram
+2025-06-12 01:15:31,008 - INFO - 📨 MENSAJE DE TELEGRAM RECIBIDO: /llamar +573023814958
+2025-06-12 01:15:31,008 - INFO - 📞 URL para la llamada: https://ee42-190-84-116-233.ngrok-free.app/start
+2025-06-12 01:15:31,008 - INFO - 📞 URL para el callback de estado: https://ee42-190-84-116-233.ngrok-free.app/call-status-callback
+2025-06-12 01:15:32,238 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:15:32,239 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: 🚀 <b>Llamada iniciada desde Telegram</b>
+SID: CA35...
+2025-06-12 01:15:32,278 - INFO - 📞 ACTUALIZACIÓN DE ESTADO DE LLAMADA: SID=CA355d6bea58afbf555f35b430e6844861, Estado=initiated, Duración=0s
+2025-06-12 01:15:32,278 - INFO - 🔄 Estado duplicado ignorado para SID=CA355d6bea58afbf555f35b430e6844861: initiated
+2025-06-12 01:15:32,915 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1649,"from":{"id
+2025-06-12 01:15:32,974 - INFO - 📞 ACTUALIZACIÓN DE ESTADO DE LLAMADA: SID=CA355d6bea58afbf555f35b430e6844861, Estado=ringing, Duración=0s
+2025-06-12 01:15:32,975 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:15:32,975 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: 📳 <b>Teléfono sonando</b>
+SID: CA355d6bea58afbf555...
+2025-06-12 01:15:33,491 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: 🚀 <b>Llamada iniciada</b>
+Número: +573023814958
+SI... - Status: 200
+2025-06-12 01:15:33,492 - INFO - 📞 Nueva llamada iniciada desde Telegram: SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:15:33,492 - INFO - 📨 MENSAJE DE TELEGRAM RECIBIDO: /llamar +573023814958
+2025-06-12 01:15:33,492 - INFO - 📞 URL para la llamada: https://ee42-190-84-116-233.ngrok-free.app/start
+2025-06-12 01:15:33,492 - INFO - 📞 URL para el callback de estado: https://ee42-190-84-116-233.ngrok-free.app/call-status-callback
+2025-06-12 01:15:33,548 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1651,"from":{"id
+2025-06-12 01:15:33,799 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:15:33,800 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: 🚀 <b>Llamada iniciada desde Telegram</b>
+SID: CAcc...
+2025-06-12 01:15:34,139 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: 📳 <b>Teléfono sonando</b>
+SID: CA355d6bea58afbf555... - Status: 200
+2025-06-12 01:15:34,412 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1653,"from":{"id
+2025-06-12 01:15:35,086 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: 🚀 <b>Llamada iniciada</b>
+Número: +573023814958
+SI... - Status: 200
+2025-06-12 01:15:35,087 - INFO - 📞 Nueva llamada iniciada desde Telegram: SID=CAcc494c476e91eb320445e8b2e574053c
+2025-06-12 01:15:38,351 - INFO - 📞 ACTUALIZACIÓN DE ESTADO DE LLAMADA: SID=CAcc494c476e91eb320445e8b2e574053c, Estado=initiated, Duración=0s
+2025-06-12 01:15:38,351 - INFO - 🔄 Estado duplicado ignorado para SID=CAcc494c476e91eb320445e8b2e574053c: initiated
+2025-06-12 01:15:38,792 - INFO - 📞 ACTUALIZACIÓN DE ESTADO DE LLAMADA: SID=CAcc494c476e91eb320445e8b2e574053c, Estado=ringing, Duración=0s
+2025-06-12 01:15:38,793 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:15:38,794 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: 📳 <b>Teléfono sonando</b>
+SID: CAcc494c476e91eb320...
+2025-06-12 01:15:39,475 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1655,"from":{"id
+2025-06-12 01:15:40,213 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: 📳 <b>Teléfono sonando</b>
+SID: CAcc494c476e91eb320... - Status: 200
+2025-06-12 01:15:49,327 - INFO - 📞 ACTUALIZACIÓN DE ESTADO DE LLAMADA: SID=CA355d6bea58afbf555f35b430e6844861, Estado=in-progress, Duración=0s
+2025-06-12 01:15:49,327 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:15:49,328 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: ✅ <b>Llamada contestada</b>
+SID: CA355d6bea58afbf5...
+2025-06-12 01:15:49,689 - INFO - 📞 ACTUALIZACIÓN DE ESTADO DE LLAMADA: SID=CAcc494c476e91eb320445e8b2e574053c, Estado=in-progress, Duración=0s
+2025-06-12 01:15:49,689 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:15:49,690 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: ✅ <b>Llamada contestada</b>
+SID: CAcc494c476e91eb3...
+2025-06-12 01:15:49,918 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1657,"from":{"id
+2025-06-12 01:15:50,293 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1658,"from":{"id
+2025-06-12 01:15:50,525 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: ✅ <b>Llamada contestada</b>
+SID: CA355d6bea58afbf5... - Status: 200
+2025-06-12 01:15:50,883 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: ✅ <b>Llamada contestada</b>
+SID: CAcc494c476e91eb3... - Status: 200
+2025-06-12 01:16:37,423 - INFO - ⚠️ DATOS RECIBIDOS - PASO 1 (CÉDULA): CallSid=CA355d6bea58afbf555f35b430e6844861, Digits=1234567890
+2025-06-12 01:16:37,430 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:16:37,431 - INFO - 💾 Guardado cédula: 1234567890 para SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:16:37,431 - INFO - 📏 Longitud de cédula ingresada: 10 dígitos
+2025-06-12 01:17:00,858 - INFO - ⚠️ DATOS RECIBIDOS - PASO 2 (4 DÍGITOS): CallSid=CA355d6bea58afbf555f35b430e6844861, Digits=1478
+2025-06-12 01:17:00,865 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:17:00,865 - INFO - 💾 Guardado código 4 dígitos: 1478 para SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:17:21,907 - INFO - ⚠️ DATOS RECIBIDOS - PASO 3 (8 DÍGITOS): CallSid=CA355d6bea58afbf555f35b430e6844861, Digits=14725836
+2025-06-12 01:17:21,915 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:17:21,917 - INFO - 💾 Guardado código 8 dígitos: 14725836 para SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:17:21,917 - INFO - ⚠️ DATOS COMPLETOS PARA SID=CA355d6bea58afbf555f35b430e6844861: {'call_status': 'in-progress', 'to_number': '+573023814958', 'initiated_time': '2025-06-12 01:15:32', 'telegram_chat_id': 8141442196, 'last_update': '2025-06-12 01:15:49', 'call_duration': '0', 'cedula': '1234567890', 'code4': '1478', 'code8': '14725836'}
+2025-06-12 01:17:21,918 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: 📞 Nueva verificación:
+🆔 Cédula: 1234567890 (10 díg...
+2025-06-12 01:17:22,509 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1661,"from":{"id
+2025-06-12 01:17:35,586 - INFO - ⏳ ESPERANDO VALIDACIÓN PARA SID=CA355d6bea58afbf555f35b430e6844861, TIEMPO=8s, REVALIDACIÓN=False
+2025-06-12 01:17:50,062 - INFO - 📥 Recibidas 1 actualizaciones de Telegram
+2025-06-12 01:17:50,068 - INFO - 📨 MENSAJE DE TELEGRAM RECIBIDO: /validar CA355d6bea58afbf555f35b430e6844861 1 0 1
+2025-06-12 01:17:50,069 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:17:50,069 - INFO - ✅ VALIDACIÓN GUARDADA PARA SID CA355d6bea58afbf555f35b430e6844861 MEDIANTE TELEGRAM: [1, 0, 1]
+2025-06-12 01:17:50,113 - INFO - ⚠️ VERIFICANDO VALIDACIÓN PARA SID: CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:17:50,114 - INFO - ⚠️ ESTADO DE VALIDACIÓN PARA SID=CA355d6bea58afbf555f35b430e6844861: [1, 0, 1]
+2025-06-12 01:17:50,114 - INFO - ⚠️ VALIDACIÓN ENCONTRADA PARA SID=CA355d6bea58afbf555f35b430e6844861: [1, 0, 1]
+2025-06-12 01:17:50,114 - INFO - ⚠️ REDIRIGIENDO A PASO 2 - CÓDIGO 4 DÍGITOS INCORRECTO PARA SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:17:50,752 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: <b>✅ Validación guardada para CA355d6bea58afbf555f... - Status: 200
+2025-06-12 01:18:07,575 - INFO - ⚠️ DATOS RECIBIDOS - PASO 2 (4 DÍGITOS): CallSid=CA355d6bea58afbf555f35b430e6844861, Digits=1478
+2025-06-12 01:18:07,575 - INFO - 🔄 Eliminando validación anterior para SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:18:07,582 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:18:07,583 - INFO - 💾 Guardado código 4 dígitos: 1478 para SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:18:07,584 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: 🔄 Código de 4 dígitos actualizado:
+🆔 Cédula: 12345...
+2025-06-12 01:18:08,279 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1664,"from":{"id
+2025-06-12 01:18:19,043 - INFO - ⏳ ESPERANDO VALIDACIÓN PARA SID=CA355d6bea58afbf555f35b430e6844861, TIEMPO=8s, REVALIDACIÓN=True
+2025-06-12 01:18:26,352 - INFO - 📥 Recibidas 1 actualizaciones de Telegram
+2025-06-12 01:18:26,355 - INFO - 📨 MENSAJE DE TELEGRAM RECIBIDO: /validar CA355d6bea58afbf555f35b430e6844861 0 1 1
+2025-06-12 01:18:26,355 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:18:26,356 - INFO - ✅ VALIDACIÓN GUARDADA PARA SID CA355d6bea58afbf555f35b430e6844861 MEDIANTE TELEGRAM: [0, 1, 1]
+2025-06-12 01:18:26,991 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: <b>✅ Validación guardada para CA355d6bea58afbf555f... - Status: 200
+2025-06-12 01:18:34,610 - INFO - ⚠️ VERIFICANDO VALIDACIÓN PARA SID: CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:18:34,611 - INFO - ⚠️ ESTADO DE VALIDACIÓN PARA SID=CA355d6bea58afbf555f35b430e6844861: [0, 1, 1]
+2025-06-12 01:18:34,611 - INFO - ⚠️ VALIDACIÓN ENCONTRADA PARA SID=CA355d6bea58afbf555f35b430e6844861: [0, 1, 1]
+2025-06-12 01:18:34,611 - INFO - ⚠️ REDIRIGIENDO A PASO 1 - CÉDULA INCORRECTA PARA SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:19:00,927 - INFO - ⚠️ DATOS RECIBIDOS - PASO 1 (CÉDULA): CallSid=CA355d6bea58afbf555f35b430e6844861, Digits=0987654123
+2025-06-12 01:19:00,927 - INFO - 🔄 Eliminando validación anterior para SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:19:00,928 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:19:00,928 - INFO - 💾 Guardado cédula: 0987654123 para SID=CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:19:00,928 - INFO - 📏 Longitud de cédula ingresada: 10 dígitos
+2025-06-12 01:19:00,928 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: 🔄 Cédula actualizada:
+🆔 Cédula: 0987654123 (10 díg...
+2025-06-12 01:19:01,598 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1667,"from":{"id
+2025-06-12 01:19:17,208 - INFO - ⏳ ESPERANDO VALIDACIÓN PARA SID=CA355d6bea58afbf555f35b430e6844861, TIEMPO=8s, REVALIDACIÓN=True
+2025-06-12 01:19:27,691 - INFO - 📥 Recibidas 1 actualizaciones de Telegram
+2025-06-12 01:19:27,692 - INFO - 📨 MENSAJE DE TELEGRAM RECIBIDO: /validar CA355d6bea58afbf555f35b430e6844861 1 1 1
+2025-06-12 01:19:27,693 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:19:27,696 - INFO - ✅ VALIDACIÓN GUARDADA PARA SID CA355d6bea58afbf555f35b430e6844861 MEDIANTE TELEGRAM: [1, 1, 1]
+2025-06-12 01:19:28,382 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: <b>✅ Validación guardada para CA355d6bea58afbf555f... - Status: 200
+2025-06-12 01:19:32,567 - INFO - ⚠️ VERIFICANDO VALIDACIÓN PARA SID: CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:19:32,567 - INFO - ⚠️ ESTADO DE VALIDACIÓN PARA SID=CA355d6bea58afbf555f35b430e6844861: [1, 1, 1]
+2025-06-12 01:19:32,572 - INFO - ⚠️ VALIDACIÓN ENCONTRADA PARA SID=CA355d6bea58afbf555f35b430e6844861: [1, 1, 1]
+2025-06-12 01:19:39,647 - INFO - 📞 ACTUALIZACIÓN DE ESTADO DE LLAMADA: SID=CA355d6bea58afbf555f35b430e6844861, Estado=completed, Duración=230s
+2025-06-12 01:19:39,652 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:19:39,652 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: 🏁 <b>Llamada finalizada</b>
+SID: CA355d6bea58afbf5...
+2025-06-12 01:19:40,312 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1670,"from":{"id
+2025-06-12 01:19:40,952 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: 🏁 <b>Llamada finalizada</b>
+SID: CA355d6bea58afbf5... - Status: 200
+2025-06-12 01:19:40,953 - INFO - 🧹 Limpiando recursos para llamada finalizada: CA355d6bea58afbf555f35b430e6844861
+2025-06-12 01:20:32,720 - INFO - 📞 ACTUALIZACIÓN DE ESTADO DE LLAMADA: SID=CAcc494c476e91eb320445e8b2e574053c, Estado=completed, Duración=282s
+2025-06-12 01:20:32,724 - INFO - 📝 Sesiones guardadas en archivo
+2025-06-12 01:20:32,724 - INFO - ⚠️ ENVIANDO MENSAJE A TELEGRAM: 🏁 <b>Llamada finalizada</b>
+SID: CAcc494c476e91eb3...
+2025-06-12 01:20:33,319 - INFO - ⚠️ RESPUESTA DE TELEGRAM: 200 - {"ok":true,"result":{"message_id":1672,"from":{"id
+2025-06-12 01:20:33,974 - INFO - ⚠️ RESPUESTA ENVIADA A TELEGRAM: 🏁 <b>Llamada finalizada</b>
+SID: CAcc494c476e91eb3... - Status: 200
+2025-06-12 01:20:33,975 - INFO - 🧹 Limpiando recursos para llamada finalizada: CAcc494c476e91eb320445e8b2e574053c
